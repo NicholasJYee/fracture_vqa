@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 import base64
 import re
+import shutil
+import traceback
 
 def create_directory_if_not_exists(directory_path):
     """
@@ -51,24 +53,113 @@ def save_upload(uploaded_file, directory="uploads"):
     Save an uploaded file to disk
     
     Args:
-        uploaded_file: The uploaded file object
+        uploaded_file: The uploaded file object or path string
         directory (str): Directory to save the file in
         
     Returns:
         str: Path to the saved file
     """
-    create_directory_if_not_exists(directory)
-    
-    # Generate a unique filename
-    filename = sanitize_filename(uploaded_file.name)
-    file_id = generate_random_id()
-    file_path = os.path.join(directory, f"{file_id}_{filename}")
-    
-    # Write the file
-    with open(file_path, "wb") as f:
-        f.write(uploaded_file.read())
-    
-    return file_path
+    try:
+        print(f"save_upload received: {type(uploaded_file)}")
+        create_directory_if_not_exists(directory)
+        
+        # Handle empty inputs
+        if uploaded_file is None:
+            raise ValueError("No file provided")
+            
+        # Special case for Gradio file input
+        if isinstance(uploaded_file, list) and len(uploaded_file) > 0:
+            print("Converting list to first element")
+            uploaded_file = uploaded_file[0]
+            
+        # Handle string paths (possibly from example files)
+        if isinstance(uploaded_file, str):
+            if os.path.exists(uploaded_file):
+                # Check if it's a directory
+                if os.path.isdir(uploaded_file):
+                    raise ValueError(f"Provided path is a directory: {uploaded_file}")
+                    
+                # If it's already a valid path, we can just return it or copy it
+                print(f"Using existing file path: {uploaded_file}")
+                
+                # Optionally copy to uploads directory
+                filename = os.path.basename(uploaded_file)
+                dest_path = os.path.join(directory, filename)
+                
+                # Only copy if not already in the target directory
+                if os.path.abspath(os.path.dirname(uploaded_file)) != os.path.abspath(directory):
+                    shutil.copy2(uploaded_file, dest_path)
+                    print(f"Copied to: {dest_path}")
+                    return dest_path
+                return uploaded_file
+            else:
+                raise ValueError(f"File not found at path: {uploaded_file}")
+        
+        # Special handling for Gradio file component which might return a dict
+        if isinstance(uploaded_file, dict) and "name" in uploaded_file:
+            print("Processing Gradio file dict")
+            original_filename = uploaded_file["name"]
+            
+            # If there's a 'path' key, use that for the source file
+            if "path" in uploaded_file:
+                source_path = uploaded_file["path"]
+                if os.path.exists(source_path) and os.path.isfile(source_path):
+                    filename = sanitize_filename(original_filename)
+                    file_id = generate_random_id()
+                    dest_path = os.path.join(directory, f"{file_id}_{filename}")
+                    shutil.copy2(source_path, dest_path)
+                    return dest_path
+        
+        # Handle file-like objects from Gradio
+        # Generate a unique filename
+        if hasattr(uploaded_file, 'name'):
+            original_filename = uploaded_file.name
+        else:
+            # If no name attribute, generate a random name with the correct extension
+            if hasattr(uploaded_file, 'orig_name'):
+                # Some Gradio versions use orig_name
+                original_filename = uploaded_file.orig_name
+            else:
+                # Last resort - make something up
+                original_filename = f"upload_{generate_random_id()}.jpg"
+        
+        filename = sanitize_filename(original_filename)
+        file_id = generate_random_id()
+        file_path = os.path.join(directory, f"{file_id}_{filename}")
+        
+        print(f"Saving uploaded file to: {file_path}")
+        
+        # Write the file - handle different types of file objects
+        if hasattr(uploaded_file, 'read'):
+            # File-like object with read method
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.read())
+        elif hasattr(uploaded_file, 'file'):
+            # Gradio UploadFile with file attribute
+            with open(file_path, "wb") as f:
+                shutil.copyfileobj(uploaded_file.file, f)
+        elif hasattr(uploaded_file, 'path') and not os.path.isdir(uploaded_file.path):
+            # Object with a path attribute (that isn't a directory)
+            shutil.copy2(uploaded_file.path, file_path)
+        else:
+            # Try direct file writing as last resort
+            try:
+                with open(file_path, "wb") as f:
+                    f.write(uploaded_file)
+            except:
+                raise TypeError(f"Unsupported file object type: {type(uploaded_file)}")
+        
+        # Verify file was written correctly
+        if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+            raise IOError(f"Failed to write file or file is empty: {file_path}")
+            
+        print(f"Successfully saved file to: {file_path}")
+        return file_path
+        
+    except Exception as e:
+        print(f"Error in save_upload: {str(e)}")
+        print(traceback.format_exc())
+        raise
 
 def read_dicom_tags(dicom_path):
     """

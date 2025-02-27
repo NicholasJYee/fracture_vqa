@@ -7,6 +7,7 @@ import base64
 from PIL import Image
 import pydicom
 import numpy as np
+import traceback
 
 # Initialize directories
 create_directory_if_not_exists("uploads")
@@ -26,65 +27,119 @@ def process_example_image(example_path):
 
 def add_text(history, text):
     """Add user text to chat history."""
-    history = history + [(text, None)]
+    # Add user message with role and content keys
+    history = history + [{"role": "user", "content": text}]
     return history, gr.Textbox(value="", interactive=False)
 
 def add_file(history, file):
     """Add uploaded file to chat history."""
     file_path = save_upload(file)
-    history = history + [((file_path,), None)]
+    history = history + [{"role": "user", "content": {"image": file_path, "text": "Uploaded X-ray image"}}]
     return history
 
 def bot(history, image_path=None):
     """Generate bot response based on the last query and image."""
-    if image_path is None and len(history) > 0 and isinstance(history[-1][0], tuple):
-        # Get image from history if not provided directly
-        image_path = history[-1][0][0]
+    # Create a copy of history to avoid modifying in-place
+    history_copy = list(history)
+    
+    # Extract image path from history if not provided directly
+    if image_path is None and len(history_copy) > 0:
+        # Look for an image in the history
+        for message in reversed(history_copy):
+            if message["role"] == "user" and isinstance(message["content"], str):
+                # Check if the message contains an image path reference
+                if "📷 Uploaded X-ray image:" in message["content"]:
+                    # Extract the path from the message
+                    parts = message["content"].split(":", 1)
+                    if len(parts) > 1:
+                        image_path = parts[1].strip()
+                    break
     
     if not image_path or image_path is None:
         # No image available
         response = "Please upload an X-ray image first."
-        history[-1][1] = response
-        return history
+        history_copy.append({"role": "assistant", "content": response})
+        return history_copy
     
-    if len(history) == 0 or history[-1][1] is not None:
-        # No question or already answered
+    # If the last message is from the assistant or we have no history, prompt for a question
+    if len(history_copy) == 0 or history_copy[-1]["role"] == "assistant":
         response = "I'm ready to answer questions about this X-ray. What would you like to know?"
-        # Add a dummy entry in history
-        if len(history) == 0 or isinstance(history[-1][0], tuple):
-            history = history + [("", response)]
-        else:
-            history[-1][1] = response
-        return history
+        history_copy.append({"role": "assistant", "content": response})
+        return history_copy
     
-    # Get the user's question
-    question = history[-1][0]
+    # Get the user's question - ensure it's a string
+    if history_copy[-1]["role"] == "user":
+        user_content = history_copy[-1]["content"]
+        # If the message contains an image upload notification, skip processing
+        if isinstance(user_content, str) and "📷 Uploaded X-ray image:" in user_content:
+            response = "I'm ready to answer questions about this X-ray. What would you like to know?"
+            history_copy.append({"role": "assistant", "content": response})
+            return history_copy
+            
+        question = user_content if isinstance(user_content, str) else ""
+        
+        try:
+            # Process the image and answer the question
+            answer = model.answer_question(image_path, question)
+            history_copy.append({"role": "assistant", "content": answer})
+        except Exception as e:
+            error_msg = f"Error processing the image: {str(e)}"
+            print(f"Error in bot function: {error_msg}")
+            print(traceback.format_exc())
+            history_copy.append({"role": "assistant", "content": error_msg})
     
-    try:
-        # Process the image and answer the question
-        answer = model.answer_question(image_path, question)
-        history[-1][1] = answer
-    except Exception as e:
-        history[-1][1] = f"Error processing the image: {str(e)}"
-    
-    return history
+    return history_copy
 
 def upload_file(files, history):
     """Handle file upload event."""
-    if not files:
-        return history, None
-    
-    file_path = save_upload(files[0])
-    
-    # Update history with the new image
-    if history is None:
-        history = []
-    history = history + [((file_path,), None)]
-    
-    # Let the bot respond with initial message
-    history = bot(history, file_path)
-    
-    return history, file_path
+    try:
+        print(f"Upload received: {type(files)}")
+        
+        # Initialize history if None
+        if history is None:
+            history = []
+            
+        # Make copy of history to avoid modifying in-place
+        history_copy = list(history)
+        
+        # Verify we have files
+        if not files:
+            print("No files received")
+            return history_copy, None
+            
+        if isinstance(files, list) and len(files) == 0:
+            print("Empty file list received")
+            return history_copy, None
+        
+        # Debug file object
+        print(f"File object structure: {files}")
+        if isinstance(files, list):
+            print(f"First file type: {type(files[0])}")
+        
+        # Save the uploaded file
+        file_path = save_upload(files)
+        
+        if not file_path or not os.path.exists(file_path):
+            print(f"File path invalid or does not exist: {file_path}")
+            return history_copy, None
+        
+        # Add user message with image content - format as a string for messages format
+        # In messages format, we can't use a dictionary for content
+        history_copy.append({
+            "role": "user", 
+            "content": f"📷 Uploaded X-ray image: {file_path}"
+        })
+        
+        # Let the bot respond with initial message
+        history_copy = bot(history_copy, file_path)
+        
+        return history_copy, file_path
+        
+    except Exception as e:
+        print(f"Error in upload_file: {str(e)}")
+        print(traceback.format_exc())
+        # Return the history unchanged if there's an error
+        return history if history is not None else [], None
 
 def display_image(file_path):
     """Display an image on the UI."""
@@ -116,11 +171,11 @@ def display_image(file_path):
 def format_history(raw_history):
     """Format chat history for display."""
     formatted = []
-    for user_msg, bot_msg in raw_history:
-        if isinstance(user_msg, tuple):  # Image upload
-            formatted.append(("📷 Uploaded X-ray image", bot_msg))
-        else:  # Text message
-            formatted.append((user_msg, bot_msg))
+    for message in raw_history:
+        if message["role"] == "user" and isinstance(message["content"], dict) and "image" in message["content"]:
+            formatted.append(("📷 Uploaded X-ray image", message["content"]["text"]))
+        else:
+            formatted.append((message["content"], None))
     return formatted
 
 def get_image_info(file_path):
@@ -156,6 +211,7 @@ with gr.Blocks(css="footer {visibility: hidden}") as interface:
                 height=600,
                 avatar_images=("👤", "🤖"),
                 bubble_full_width=False,
+                type="messages"  # Use newer 'messages' format
             )
             with gr.Row():
                 txt = gr.Textbox(
@@ -164,7 +220,12 @@ with gr.Blocks(css="footer {visibility: hidden}") as interface:
                     placeholder="Ask a question about the X-ray...",
                     container=False,
                 )
-                btn = gr.UploadButton("📷", file_types=["image", ".dcm"])
+                # Using File component with filepath type
+                btn = gr.File(
+                    label="Upload X-ray Image",
+                    file_types=["image", ".dcm"],
+                    type="filepath"
+                )
         
         with gr.Column(scale=1):
             image_output = gr.Image(type="filepath", label="Current X-ray Image")
@@ -191,7 +252,8 @@ with gr.Blocks(css="footer {visibility: hidden}") as interface:
     )
     txt_msg.then(lambda: gr.Textbox(interactive=True), None, [txt], queue=False)
     
-    file_msg = btn.upload(upload_file, [btn, chatbot], [chatbot, image_output], queue=True)
+    # Change from btn.upload to btn.change
+    file_msg = btn.change(upload_file, [btn, chatbot], [chatbot, image_output], queue=True)
     file_msg.then(get_image_info, [image_output], [image_info])
     
     gr.Markdown("## Sample Questions to Ask")
@@ -218,4 +280,4 @@ create_directory_if_not_exists("examples")
 
 # Run the interface
 if __name__ == "__main__":
-    interface.launch(share=True) 
+    interface.launch(debug=True)

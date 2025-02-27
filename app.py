@@ -17,7 +17,6 @@ if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
 
 # Initialize directories
 create_directory_if_not_exists("uploads")
-create_directory_if_not_exists("examples")
 
 # Initialize the model
 model = XrayVQAModel()

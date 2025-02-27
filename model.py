@@ -9,6 +9,7 @@ from io import BytesIO
 import pydicom
 from skimage import exposure
 import tempfile
+import gc  # For explicit garbage collection
 from transformers import BlipProcessor, BlipForQuestionAnswering, ViTImageProcessor, ViTModel, BertTokenizer, BertModel
 
 class MedQFormer3D(nn.Module):
@@ -17,13 +18,14 @@ class MedQFormer3D(nn.Module):
     This module bridges the visual features from a vision encoder with a language model
     for medical image understanding with pseudo-3D features.
     """
-    def __init__(self, vision_hidden_size=768, text_hidden_size=768, num_query_tokens=8, num_slices=3):
+    def __init__(self, vision_hidden_size=768, text_hidden_size=768, num_query_tokens=8, num_slices=3, device="cuda"):
         super().__init__()
         self.num_query_tokens = num_query_tokens
         self.num_slices = num_slices
+        self.device = device
         
         # Learnable query tokens that will be enhanced with visual information
-        self.query_tokens = nn.Parameter(torch.zeros(1, num_query_tokens, text_hidden_size))
+        self.query_tokens = nn.Parameter(torch.zeros(1, num_query_tokens, text_hidden_size, device=device))
         torch.nn.init.normal_(self.query_tokens, std=0.02)
         
         # Projection from vision encoder space to text encoder space
@@ -51,8 +53,14 @@ class MedQFormer3D(nn.Module):
             nn.GELU(),
             nn.Linear(text_hidden_size * 4, text_hidden_size)
         )
+        
+        # Move entire model to device
+        self.to(device)
     
     def forward(self, vision_features_3d):
+        # Ensure input is on the correct device
+        vision_features_3d = vision_features_3d.to(self.device)
+        
         # vision_features_3d shape: [batch_size, num_slices, seq_length, hidden_size]
         batch_size, num_slices, seq_length, hidden_size = vision_features_3d.shape
         
@@ -118,6 +126,9 @@ class MedBLIPModel(nn.Module):
             "fracture", "break", "pneumonia", "opacity", "normal", 
             "abnormal", "effusion", "pneumothorax", "dislocation"
         ]
+        
+        # Move entire model to device
+        self.to(device)
     
     def preprocess_image_for_model(self, image):
         """Simple preprocessing for images"""
@@ -165,8 +176,8 @@ class MedBLIPModel(nn.Module):
         print("Generating response with BLIP...")
         inputs = self.processor(image, enhanced_question, return_tensors="pt").to(self.device)
         
-        # Generate answer
-        with torch.no_grad():
+        # Generate answer with CUDA optimizations
+        with torch.cuda.amp.autocast() if str(self.device) == "cuda" else torch.no_grad():
             outputs = self.model.generate(**inputs, max_length=max_length)
             answer = self.processor.decode(outputs[0], skip_special_tokens=True)
         
@@ -176,6 +187,10 @@ class MedBLIPModel(nn.Module):
             
         # Update cache with the generated answer
         self._update_cache(image, question, answer)
+        
+        # Free up CUDA memory
+        if str(self.device) == "cuda":
+            torch.cuda.empty_cache()
             
         return answer
 
@@ -227,14 +242,34 @@ class XrayVQAModel:
         print("X-RAY VISUAL QUESTION ANSWERING MODEL INITIALIZATION")
         print("="*80)
         
-        # Choose device: CUDA -> MPS -> CPU
+        # Enhanced device selection with better CUDA support
         if torch.cuda.is_available():
-            self.device = torch.device("cuda")
+            # Get CUDA device info
+            cuda_id = 0  # Default to first GPU
+            cuda_device_count = torch.cuda.device_count()
+            cuda_device_name = torch.cuda.get_device_name(cuda_id)
+            
+            print(f"CUDA available: {cuda_device_count} device(s)")
+            print(f"Using CUDA device {cuda_id}: {cuda_device_name}")
+            
+            # Set device with properties
+            self.device = torch.device(f"cuda:{cuda_id}")
+            
+            # Set CUDA optimizations
+            torch.backends.cudnn.benchmark = True  # Enable cudnn autotuner
+            torch.backends.cuda.matmul.allow_tf32 = True  # Allow TF32 precision mode
+            
+            # Set max memory usage (adjust based on your GPU)
+            if hasattr(torch.cuda, 'set_per_process_memory_fraction'):
+                torch.cuda.set_per_process_memory_fraction(0.9)  # Use up to 90% of GPU memory
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             self.device = torch.device("mps")
+            print("Using MPS device")
         else:
             self.device = torch.device("cpu")
-        print(f"Using device: {self.device}")
+            print("Using CPU (No CUDA/MPS available)")
+        
+        print(f"Device: {self.device}")
         
         # Initialize lightweight model for medical VQA
         try:
@@ -242,7 +277,7 @@ class XrayVQAModel:
             print("MODEL SELECTION: Lightweight VQA model")
             print("Using smaller models for faster predictions")
             
-            # Initialize our model
+            # Initialize our model with device
             self.medblip_model = MedBLIPModel(device=self.device, num_slices=3)
             
             self.model_type = "lightweight-radiological"
@@ -345,6 +380,12 @@ class XrayVQAModel:
         # Generate answer
         print("🔬 Fast analysis in progress...")
         answer = self.medblip_model.generate_answer(image, enhanced_question)
+        
+        # Clear any residual CUDA memory
+        if str(self.device).startswith("cuda"):
+            torch.cuda.empty_cache()
+            gc.collect()
+            
         return answer
     
     def load_from_url(self, image_url, question):
@@ -390,10 +431,15 @@ class XrayVQAModel:
             
         image = Image.fromarray(img_array)
         
-        # Use our PeFoMed model to generate an answer
+        # Use our model to generate an answer
         print("🔬 Analyzing the X-ray...")
         answer = self.medblip_model.generate_answer(image, question)
         
+        # Clear any residual CUDA memory
+        if str(self.device).startswith("cuda"):
+            torch.cuda.empty_cache()
+            gc.collect()
+            
         return answer
 
 
@@ -411,7 +457,7 @@ if __name__ == "__main__":
     print("\n" + "="*80)
     print("DEMO 1: LOCAL X-RAY ANALYSIS")
     print("="*80)
-    image_path = "/Users/Y/Dropbox/1University_of_Toronto/0Graduate_School/2FARIL_internship/fracture-vqa-v6/example/calcaneal-fracture.jpeg"
+    image_path = "./example/calcaneal-fracture.jpeg"
     question = "Is there a fracture in this X-ray?"
     print(f"\n📁 Analyzing local image: {os.path.basename(image_path)}")
     print(f"❓ Question: \"{question}\"")

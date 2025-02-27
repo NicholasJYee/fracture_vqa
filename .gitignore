@@ -8,3 +8,6 @@ hf_*
 *.pyd
 .Python
 *.log
+.gradio/
+uploads/
+temp/

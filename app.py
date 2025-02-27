@@ -1,6 +1,7 @@
 import os
 import gradio as gr
 import tempfile
+import torch
 from model import XrayVQAModel
 from utils import save_upload, enhance_xray_for_display, read_dicom_tags, create_directory_if_not_exists
 import base64
@@ -8,6 +9,11 @@ from PIL import Image
 import pydicom
 import numpy as np
 import traceback
+
+# Enable MPS (Metal Performance Shaders) for macOS if available
+if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    torch.backends.mps.is_built = True
+    print("MPS (Metal Performance Shaders) is available and enabled")
 
 # Initialize directories
 create_directory_if_not_exists("uploads")
@@ -240,27 +246,9 @@ with gr.Blocks() as interface:
     file_msg = btn.change(upload_file, [btn, chatbot], [chatbot, image_output], queue=True)
     file_msg.then(get_image_info, [image_output], [image_info])
     
-    gr.Markdown("## Sample Questions to Ask")
     gr.Markdown("""
-    - Is there any evidence of pneumonia in this chest X-ray?
-    - Do you see any fractures or breaks in the bones?
-    - Are there any abnormal masses or nodules visible?
-    - Is there pleural effusion present?
-    - Does this X-ray show signs of cardiomegaly (enlarged heart)?
-    - Are the lungs clear or is there congestion?
-    - Is there any sign of atelectasis (collapsed lung tissue)?
-    - Does this X-ray appear normal or are there concerning findings?
+    Made by Nicholas J. Yee.
     """)
-    
-    gr.Markdown("### Note")
-    gr.Markdown("""
-    - This AI assistant is not a replacement for professional medical advice.
-    - Always consult with a qualified healthcare provider for proper diagnosis.
-    - The AI model has limitations and may not detect all conditions.
-    """)
-
-# Create examples directory and download example files if needed
-create_directory_if_not_exists("examples")
 
 # Run the interface
 if __name__ == "__main__":

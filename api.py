@@ -33,7 +33,8 @@ create_directory_if_not_exists("temp")
 
 # Initialize model
 model = XrayVQAModel()
-logger.info(f"Model initialized successfully using device: {model.device}")
+device_type = "CUDA" if str(model.device) == "cuda" else "MPS" if str(model.device) == "mps" else "CPU"
+logger.info(f"Model initialized successfully using device: {device_type} ({model.device})")
 
 # Create FastAPI app
 app = FastAPI(

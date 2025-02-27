@@ -199,7 +199,7 @@ def get_image_info(file_path):
             return f"Error reading image: {str(e)}"
 
 # Create the Gradio interface
-with gr.Blocks(css="footer {visibility: hidden}") as interface:
+with gr.Blocks() as interface:
     gr.Markdown("# X-Ray Visual Question Answering Chatbot")
     gr.Markdown("Upload an X-ray image and ask questions about it. The AI will analyze the image and provide answers.")
     
@@ -209,7 +209,6 @@ with gr.Blocks(css="footer {visibility: hidden}") as interface:
                 [],
                 elem_id="chatbot",
                 height=600,
-                avatar_images=("👤", "🤖"),
                 bubble_full_width=False,
                 type="messages"  # Use newer 'messages' format
             )
@@ -228,25 +227,10 @@ with gr.Blocks(css="footer {visibility: hidden}") as interface:
                 )
         
         with gr.Column(scale=1):
-            image_output = gr.Image(type="filepath", label="Current X-ray Image")
+            # Display the image but don't allow interaction with it
+            image_output = gr.Image(type="filepath", label="Current X-ray Image", interactive=False)
             image_info = gr.Markdown("Upload an X-ray to see information")
             
-            example_files = [
-                os.path.join(os.path.dirname(__file__), "examples", f) 
-                for f in ["normal_chest.jpg", "pneumonia_example.jpg", "fracture_xray.jpg"] 
-                if os.path.exists(os.path.join(os.path.dirname(__file__), "examples", f))
-            ]
-            
-            if example_files:
-                gr.Markdown("### Example X-rays")
-                gr.Examples(
-                    examples=example_files,
-                    inputs=btn,
-                    outputs=[chatbot, image_output],
-                    fn=upload_file,
-                    cache_examples=True,
-                )
-    
     txt_msg = txt.submit(add_text, [chatbot, txt], [chatbot, txt], queue=False).then(
         bot, chatbot, chatbot
     )

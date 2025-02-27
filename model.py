@@ -109,17 +109,35 @@ class XrayVQAModel:
         # Preprocess the image
         image = self.preprocess_image(image_path)
         
-        # Add medical context to the question if needed
+        # Add medical context and request detailed response in the prompt
         if not any(term in question.lower() for term in ['x-ray', 'xray', 'radiograph', 'image', 'scan']):
-            question = f"In this X-ray image, {question}"
+            enhanced_question = f"In this X-ray image, {question}. Please provide a detailed medical analysis."
+        else:
+            enhanced_question = f"{question} Please provide a detailed medical analysis."
         
         # Prepare inputs for the model
-        inputs = self.processor(image, question, return_tensors="pt").to(self.device)
+        inputs = self.processor(image, enhanced_question, return_tensors="pt").to(self.device)
         
-        # Generate answer
+        # Generate answer with parameters for longer, more detailed responses
         with torch.no_grad():
-            outputs = self.model.generate(**inputs)
+            outputs = self.model.generate(
+                **inputs,
+                max_length=100,  # Allow for longer responses
+                min_length=20,   # Ensure at least a few sentences
+                num_beams=5,     # More thorough search for better responses
+                length_penalty=1.5,  # Encourage longer responses
+                no_repeat_ngram_size=2  # Avoid repetition
+            )
             answer = self.processor.decode(outputs[0], skip_special_tokens=True)
+        
+        # Post-process short answers to make them more detailed
+        if len(answer.split()) < 5:
+            if "yes" in answer.lower():
+                answer = f"Yes, the X-ray shows evidence of what you're asking about. {answer}"
+            elif "no" in answer.lower():
+                answer = f"No, the X-ray does not show clear evidence of what you're asking about. {answer}"
+            else:
+                answer = f"Based on the X-ray image, {answer}. Further clinical correlation may be needed for a definitive diagnosis."
         
         return answer
         
@@ -134,6 +152,10 @@ class XrayVQAModel:
         Returns:
             str: Answer to the question
         """
+        # Handle empty or None question
+        if not question or question is None:
+            return "Please ask a specific question about this X-ray image."
+            
         response = requests.get(image_url)
         image = Image.open(BytesIO(response.content)).convert('RGB')
         
@@ -157,17 +179,35 @@ class XrayVQAModel:
             
         image = Image.fromarray(img_array)
         
-        # Add medical context to the question if needed
+        # Add medical context and request detailed response in the prompt
         if not any(term in question.lower() for term in ['x-ray', 'xray', 'radiograph', 'image', 'scan']):
-            question = f"In this X-ray image, {question}"
+            enhanced_question = f"In this X-ray image, {question}. Please provide a detailed medical analysis."
+        else:
+            enhanced_question = f"{question} Please provide a detailed medical analysis."
         
         # Prepare inputs for the model
-        inputs = self.processor(image, question, return_tensors="pt").to(self.device)
+        inputs = self.processor(image, enhanced_question, return_tensors="pt").to(self.device)
         
-        # Generate answer
+        # Generate answer with parameters for longer, more detailed responses
         with torch.no_grad():
-            outputs = self.model.generate(**inputs)
+            outputs = self.model.generate(
+                **inputs,
+                max_length=100,  # Allow for longer responses
+                min_length=20,   # Ensure at least a few sentences
+                num_beams=5,     # More thorough search for better responses
+                length_penalty=1.5,  # Encourage longer responses
+                no_repeat_ngram_size=2  # Avoid repetition
+            )
             answer = self.processor.decode(outputs[0], skip_special_tokens=True)
+        
+        # Post-process short answers to make them more detailed
+        if len(answer.split()) < 5:
+            if "yes" in answer.lower():
+                answer = f"Yes, the X-ray shows evidence of what you're asking about. {answer}"
+            elif "no" in answer.lower():
+                answer = f"No, the X-ray does not show clear evidence of what you're asking about. {answer}"
+            else:
+                answer = f"Based on the X-ray image, {answer}. Further clinical correlation may be needed for a definitive diagnosis."
         
         return answer
 

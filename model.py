@@ -102,6 +102,10 @@ class XrayVQAModel:
         Returns:
             str: Answer to the question
         """
+        # Handle empty or None question
+        if not question or question is None:
+            return "Please ask a specific question about this X-ray image."
+            
         # Preprocess the image
         image = self.preprocess_image(image_path)
         

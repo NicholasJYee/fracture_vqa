@@ -239,7 +239,6 @@ class MedBLIPModel(nn.Module):
         # Expected shape: [batch_size, slices, channels, height, width]
         if len(stacked_pixel_values.shape) == 5:
             batch_size, num_slices, channels, height, width = stacked_pixel_values.shape
-            print(f"  Processing 3D volume with shape: {stacked_pixel_values.shape}")
             
             # Reshape to process each slice through vision encoder
             # [batch_size * slices, channels, height, width]
@@ -259,7 +258,6 @@ class MedBLIPModel(nn.Module):
             
         else:
             # Handle other input formats
-            print(f"  Input format not optimal for 3D processing: {stacked_pixel_values.shape}")
             # Create empty list for vision features
             vision_features_list = []
             
@@ -291,7 +289,7 @@ class MedBLIPModel(nn.Module):
             # Stack vision features to create 3D representation
             # [batch_size, slices, seq_length, hidden_size]
             vision_features_3d = torch.stack(vision_features_list, dim=1)
-            
+        
         # Process stacked features through MedQFormer
         med_query_features = self.medqformer(vision_features_3d)
         
@@ -330,12 +328,10 @@ class MedBLIPModel(nn.Module):
             String answer to the question
         """
         # Create pseudo-3D volume from 2D image
-        print("🔄 Creating pseudo-3D volume from 2D X-ray...")
+        print("Processing image...")
         image_3d = self.create_3d_from_2d(image)
-        print(f"  Created {len(image_3d)} pseudo-3D slices from the 2D X-ray")
         
         # Process all slices together as a batch
-        print("  Processing all slices as a 3D volume...")
         batch_pixel_values = []
         
         # Process each slice with the vision processor 
@@ -344,15 +340,12 @@ class MedBLIPModel(nn.Module):
             # Extract pixel values without batch dimension
             slice_pixel_values = slice_inputs.pixel_values.squeeze(0)
             batch_pixel_values.append(slice_pixel_values)
-            print(f"    Slice {i+1} shape: {slice_pixel_values.shape}")
-        
+            
         # Stack all slices together along a new dimension (batch of slices)
         stacked_pixel_values = torch.stack(batch_pixel_values, dim=0)
-        print(f"  Stacked 3D volume shape: {stacked_pixel_values.shape}")
         
         # Add batch dimension for model processing
         stacked_pixel_values = stacked_pixel_values.unsqueeze(0)
-        print(f"  Final input shape with batch dimension: {stacked_pixel_values.shape}")
         
         # Preprocess question
         enhanced_question = f"Medical Question: {question} Answer:"
@@ -368,7 +361,7 @@ class MedBLIPModel(nn.Module):
         stacked_pixel_values = stacked_pixel_values.to(self.device)
         
         # Forward pass to get logits
-        print("  Generating answer...")
+        print("Generating response...")
         with torch.no_grad():
             logits = self(
                 pixel_values_list=[stacked_pixel_values],
@@ -376,9 +369,10 @@ class MedBLIPModel(nn.Module):
                 attention_mask=text_inputs.attention_mask
             )
         
-        # Greedy decoding
+        # Improved decoding with temperature sampling for better output quality
         generated_ids = []
         current_ids = text_inputs.input_ids
+        temperature = 0.5  # Temperature for controlling randomness (lower = more deterministic)
         
         for i in range(max_length):
             with torch.no_grad():
@@ -388,8 +382,20 @@ class MedBLIPModel(nn.Module):
                     attention_mask=torch.ones_like(current_ids).to(self.device)
                 )
                 
-                next_token_logits = outputs[:, -1, :]
-                next_token = torch.argmax(next_token_logits, dim=-1)
+                # Apply temperature scaling for more fluent text
+                next_token_logits = outputs[:, -1, :] / temperature
+                
+                # Filter out low probability tokens for better quality
+                top_k = 40  # Consider only top k tokens
+                top_k_logits, top_k_indices = torch.topk(next_token_logits, top_k)
+                
+                # Convert logits to probabilities
+                top_k_probs = torch.nn.functional.softmax(top_k_logits, dim=-1)
+                
+                # Sample from the probability distribution
+                next_token_idx = torch.multinomial(top_k_probs, num_samples=1)
+                next_token = top_k_indices.gather(-1, next_token_idx)
+                next_token = next_token.squeeze(-1)
                 
                 # Stop if we predict the end token
                 if next_token.item() == self.text_tokenizer.sep_token_id:
@@ -397,23 +403,23 @@ class MedBLIPModel(nn.Module):
                     
                 generated_ids.append(next_token.item())
                 
-                # Fix dimension mismatch by ensuring next_token has the correct shape
-                # Print shapes for debugging
-                print(f"  current_ids shape: {current_ids.shape}")
-                print(f"  next_token shape before processing: {next_token.shape}")
+                # Ensure next_token has the correct shape
+                next_token_reshaped = next_token.reshape(current_ids.shape[0], 1)
                 
-                # Create a properly shaped tensor for concatenation
-                # current_ids is [batch_size, seq_len] so next_token should be [batch_size, 1]
-                next_token_reshaped = next_token.clone().detach()
-                # Reshape to match batch dimension of current_ids
-                next_token_reshaped = next_token_reshaped.reshape(current_ids.shape[0], 1)
-                print(f"  next_token shape after reshape: {next_token_reshaped.shape}")
-                
-                # Concatenate along sequence dimension (dim=1)
+                # Concatenate along sequence dimension
                 current_ids = torch.cat([current_ids, next_token_reshaped], dim=1)
         
         # Decode the generated tokens
         answer = self.text_tokenizer.decode(generated_ids, skip_special_tokens=True)
+        
+        # Simple post-processing to ensure the answer is coherent
+        if len(answer.strip()) < 3:
+            answer = "Based on the X-ray, I cannot provide a definitive answer."
+        
+        # Make sure the answer is complete (ends with punctuation)
+        if answer and answer[-1] not in ['.', '!', '?']:
+            answer += '.'
+            
         return answer
 
 class XrayVQAModel:
@@ -570,7 +576,7 @@ class XrayVQAModel:
         Returns:
             str: Answer to the question
         """
-        print(f"\n📋 Analyzing X-ray with model: {self.model_type.upper()}")
+        print(f"\n📋 Analyzing X-ray")
         print(f"📝 Question: \"{question}\"")
         
         # Handle empty or None question
@@ -578,13 +584,13 @@ class XrayVQAModel:
             return "Please ask a specific question about this X-ray image."
             
         # Preprocess the image
-        print(f"🖼️  Preprocessing image: {os.path.basename(image_path)}")
+        print(f"🖼️  Preprocessing image")
         image = self.preprocess_image(image_path)
         
-        # Use the MedBLIP model without error catching to expose the full stack trace
-        print("🔬 Using MedBLIP-adapted model with 3D processing for medical image analysis...")
+        # Use the MedBLIP model 
+        print("🔬 Analyzing the X-ray...")
         
-        # Use our MedBLIP model to generate an answer and return it directly without enhancement
+        # Use our MedBLIP model to generate an answer
         answer = self.medblip_model.generate_answer(image, question)
         return answer
     
@@ -599,7 +605,7 @@ class XrayVQAModel:
         Returns:
             str: Answer to the question
         """
-        print(f"\n🌐 Loading X-ray from URL with model: {self.model_type.upper()}")
+        print(f"\n🌐 Loading X-ray from URL")
         print(f"📝 Question: \"{question}\"")
         
         # Handle empty or None question
@@ -607,12 +613,11 @@ class XrayVQAModel:
             return "Please ask a specific question about this X-ray image."
             
         # Download the image
-        print(f"⬇️ Downloading image from: {image_url}")
+        print(f"⬇️ Downloading image from URL")
         response = requests.get(image_url, timeout=10)
         response.raise_for_status()  # Raise an exception for HTTP errors
         
         image = Image.open(BytesIO(response.content)).convert('RGB')
-        print(f"✅ Image downloaded successfully: {image.width}x{image.height} pixels")
         
         # Preprocess the image (convert from PIL to numpy and back)
         img_array = np.array(image)
@@ -620,10 +625,9 @@ class XrayVQAModel:
         # Apply the same preprocessing as for local images
         if len(img_array.shape) == 2:
             img_array = np.stack([img_array] * 3, axis=-1)
-            print("   Converting grayscale image to RGB")
             
         if img_array.mean() < 128:
-            print("   Enhancing contrast for better feature visibility")
+            # Apply CLAHE for contrast enhancement
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
             lab_planes = list(cv2.split(lab))
@@ -633,15 +637,10 @@ class XrayVQAModel:
             
         image = Image.fromarray(img_array)
         
-        # Save to a temporary file
-        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp:
-            temp_path = temp.name
-            image.save(temp_path)
-            print(f"✅ Preprocessed image saved to temporary file: {os.path.basename(temp_path)}")
-            
-        # Use our MedBLIP model to generate an answer directly without enhancement
-        print("🔬 Using MedBLIP-adapted model with 3D processing for medical image analysis...")
+        # Use our MedBLIP model to generate an answer
+        print("🔬 Analyzing the X-ray...")
         answer = self.medblip_model.generate_answer(image, question)
+        
         return answer
 
 

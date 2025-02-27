@@ -93,346 +93,54 @@ class MedQFormer3D(nn.Module):
 
 class MedBLIPModel(nn.Module):
     """
-    PeFoMed (Perception Foundation Model for Medicine) implementation for X-ray analysis.
-    This model specializes in understanding radiological images and answering medical questions
-    with high accuracy and clinically relevant context.
+    Medical BLIP implementation for X-ray analysis using the original BLIP architecture.
+    This model leverages BLIP's integrated vision-language approach for more efficient processing.
     """
     def __init__(self, device, num_slices=3):
         super().__init__()
         self.device = device
         self.num_slices = num_slices
         
-        # PeFoMed vision encoder - specialized for medical perception
-        self.vision_encoder_name = "google/vit-base-patch16-224"  # Smaller, faster vision model
-        print(f"Loading lightweight vision encoder: {self.vision_encoder_name}")
-        self.vision_processor = ViTImageProcessor.from_pretrained(self.vision_encoder_name)
-        self.vision_encoder = ViTModel.from_pretrained(self.vision_encoder_name)
-        
-        # Freeze the vision encoder
-        for param in self.vision_encoder.parameters():
-            param.requires_grad = False
-        
-        # PeFoMed Text encoder - clinical language understanding
-        # Using a smaller, faster BERT model
-        self.text_encoder_name = "distilbert-base-uncased"  # Smaller, faster text model
-        print(f"Loading lightweight text encoder: {self.text_encoder_name}")
-        self.text_tokenizer = BertTokenizer.from_pretrained(self.text_encoder_name)
-        self.text_encoder = BertModel.from_pretrained(self.text_encoder_name)
-        
-        # Freeze the text encoder
-        for param in self.text_encoder.parameters():
-            param.requires_grad = False
-            
-        # PeFoMed multimodal bridge - enhanced for radiological context
-        self.medqformer = MedQFormer3D(
-            vision_hidden_size=self.vision_encoder.config.hidden_size,
-            text_hidden_size=self.text_encoder.config.hidden_size,
-            num_query_tokens=16,  # Increased for better medical detail capture
-            num_slices=self.num_slices
-        )
-        
-        # PeFoMed classifier with differential diagnosis capabilities
-        self.vqa_classifier = nn.Linear(
-            self.text_encoder.config.hidden_size,
-            self.text_encoder.config.vocab_size
-        )
-        
-        # Enhanced radiological terminology for X-ray interpretation
-        self.medical_terms = [
-            # General terms
-            "normal", "abnormal", "unremarkable", "remarkable", 
-            # Bone conditions
-            "fracture", "break", "dislocation", "subluxation", "osteophyte",
-            "erosion", "sclerosis", "lytic", "blastic", "lucency", "density",
-            "periosteal", "comminuted", "displaced", "nondisplaced", "transverse",
-            "oblique", "spiral", "compression", "impacted", "avulsion",
-            # Chest/Lung findings
-            "pneumonia", "infection", "consolidation", "infiltrate", "opacity",
-            "cardiomegaly", "effusion", "pneumothorax", "edema", "atelectasis", 
-            "pleural", "fibrosis", "emphysema", "mass", "nodule", "interstitial",
-            "bronchiectasis", "hilum", "fissure", "aspiration", "silhouette",
-            # Abdominal findings
-            "obstruction", "ileus", "perforation", "free air", "calcification",
-            "nephrolithiasis", "aerobilia", "organomegaly", "ascites",
-            # Vascular findings
-            "aneurysm", "dissection", "thrombus", "embolism", "ischemia", 
-            "atherosclerosis", "stenosis", "dilation", "calcification",
-            # Tumor-related
-            "tumor", "mass", "metastasis", "lesion", "malignancy", "cancer",
-            "primary", "secondary", "radiolucent", "radiopaque", "lytic",
-            # Spinal conditions
-            "arthritis", "osteoarthritis", "scoliosis", "kyphosis", "spondylosis", 
-            "spondylolisthesis", "narrowing", "stenosis", "disc", "vertebral",
-            "degenerative", "osteophyte", "compression", "herniation",
-            # Pediatric specific
-            "epiphyseal", "metaphyseal", "physeal", "salter-harris", "growth plate",
-            # Assessment terms
-            "yes", "no", "maybe", "unclear", "possible", "probable", "definite",
-            "cannot exclude", "consistent with", "suggestive of", "characteristic",
-            "diagnostic", "pathognomonic", "nonspecific", "unchanged", "improved",
-            "worsened", "acute", "chronic", "subacute", "resolving", "sequela"
-        ]
-        
-        # Get token IDs for medical terms to enhance their prediction probability
-        self.medical_token_ids = []
-        for term in self.medical_terms:
-            tokens = self.text_tokenizer.encode(term, add_special_tokens=False)
-            self.medical_token_ids.extend(tokens)
-        self.medical_token_ids = list(set(self.medical_token_ids))  # Remove duplicates
-        
-        # Improved specialized prompting system for radiological contexts
-        self.clinical_prefixes = {
-            "general": "Radiological interpretation: ",
-            "chest": "Chest radiograph assessment: ",
-            "bone": "Skeletal radiographic evaluation: ",
-            "joint": "Articular radiographic findings: ",
-            "abdomen": "Abdominal radiographic analysis: ",
-            "spine": "Spinal imaging evaluation: ",
-            "pediatric": "Pediatric radiographic assessment: ",
-            "emergency": "Emergency radiological findings: ",
-            "fracture": "Fracture analysis: ",
-            "foreign_body": "Foreign body assessment: ",
-            "soft_tissue": "Soft tissue evaluation: "
-        }
-        
-        # Advanced radiological findings categories for structured reporting
-        self.finding_categories = {
-            "fracture": ["fracture", "break", "discontinuity", "fx", "comminuted", "displaced"],
-            "alignment": ["alignment", "dislocation", "subluxation", "position", "rotation", "angulation"],
-            "joints": ["joint space", "articulation", "arthritis", "degenerative", "erosion"],
-            "bone_quality": ["density", "osteopenia", "osteoporosis", "sclerosis", "lucency"],
-            "soft_tissue": ["swelling", "effusion", "edema", "hematoma", "fluid", "mass"],
-            "hardware": ["hardware", "implant", "prosthesis", "fixation", "plate", "screw", "rod"],
-            "airspace": ["consolidation", "opacity", "infiltrate", "pneumonia", "atelectasis"],
-            "pleural": ["pleural", "effusion", "pneumothorax", "hemothorax", "fluid", "thickening"],
-            "cardiac": ["cardiac", "cardiomegaly", "heart", "failure", "enlargement", "silhouette"],
-            "vascular": ["vascular", "aorta", "atherosclerosis", "calcification", "hilar", "hilum"],
-            "abdominal": ["bowel", "gas", "obstruction", "ileus", "free air", "organomegaly"],
-            "foreign_body": ["foreign", "object", "device", "tube", "line", "catheter"]
-        }
-        
-        # PeFoMed confidence scoring system
-        self.confidence_scales = {
-            "high": 0.9,     # Findings with high certainty
-            "moderate": 0.7, # Probable findings
-            "low": 0.5       # Possible findings
-        }
+        # Use BLIP model for faster processing
+        self.model_name = "Salesforce/blip-vqa-base"
+        print(f"Loading BLIP model: {self.model_name}")
+        self.processor = BlipProcessor.from_pretrained(self.model_name)
+        self.model = BlipForQuestionAnswering.from_pretrained(self.model_name)
         
         # Move model to device
-        self.to(device)
+        self.model.to(device)
+        
+        # Cache for answers to improve response time for repeated questions
+        self.answer_cache = {}
+        
+        # List of medical terms for better medical context
+        self.medical_terms = [
+            "fracture", "break", "pneumonia", "opacity", "normal", 
+            "abnormal", "effusion", "pneumothorax", "dislocation"
+        ]
     
     def preprocess_image_for_model(self, image):
-        """Resize and normalize image for model input"""
+        """Simple preprocessing for images"""
         # Check if it's a PIL image, if so convert to numpy
         if isinstance(image, Image.Image):
-            image_np = np.array(image)
+            return image
         else:
-            image_np = image
-            
-        # Make sure it's RGB
-        if len(image_np.shape) == 2:  # If grayscale
-            image_np = np.stack([image_np] * 3, axis=2)
-            
-        # Convert back to PIL
-        pil_image = Image.fromarray(image_np.astype(np.uint8))
-        
-        # Use the vision processor to properly format for the model
-        # This handles resizing and normalization
-        return pil_image
+            # Convert numpy array to PIL
+            if len(image.shape) == 2:  # If grayscale
+                image = np.stack([image] * 3, axis=2)
+            return Image.fromarray(image.astype(np.uint8))
         
     def create_3d_from_2d(self, image):
         """
-        Create a simplified pseudo-3D volume from a 2D image with minimal processing
-        for faster execution.
+        Create a simplified representation from a 2D image with minimal processing.
+        For BLIP, we only need the original image.
         """
-        # Ensure the image is properly formatted
-        image = self.preprocess_image_for_model(image)
-        
-        # Convert PIL image to numpy array
-        img_array = np.array(image)
-        
-        # Create simplified variations with basic processing
-        pseudo_3d_volume = []
-        
-        # 1. Original image
-        pseudo_3d_volume.append(img_array.copy())
-        
-        # 2. Simple blurred version
-        blurred = cv2.GaussianBlur(img_array, (5, 5), 0)
-        pseudo_3d_volume.append(blurred)
-        
-        # 3. Simple brightness adjusted version (faster than edge detection)
-        if len(img_array.shape) == 3:
-            adjusted = np.clip(img_array * 1.2, 0, 255).astype(np.uint8)
-        else:
-            adjusted = np.clip(img_array * 1.2, 0, 255).astype(np.uint8)
-            adjusted = np.stack([adjusted] * 3, axis=2)
-        
-        pseudo_3d_volume.append(adjusted)
-            
-        # Ensure all slices are RGB
-        for i in range(len(pseudo_3d_volume)):
-            slice_img = pseudo_3d_volume[i]
-            # Convert to RGB if grayscale
-            if len(slice_img.shape) == 2:
-                slice_img = np.stack([slice_img] * 3, axis=2)
-            # Ensure it's uint8
-            if slice_img.dtype != np.uint8:
-                slice_img = (slice_img * 255).astype(np.uint8)
-            pseudo_3d_volume[i] = slice_img
-                
-        # Convert to list of PIL images
-        return [Image.fromarray(slice_img) for slice_img in pseudo_3d_volume]
+        # Return the original image since BLIP processes a single image
+        return self.preprocess_image_for_model(image)
     
-    def _analyze_question_type(self, question):
+    def generate_answer(self, image, question, max_length=50):
         """
-        Analyze question to determine its focus for better radiological context
-        """
-        question_lower = question.lower()
-        
-        # Detect question types for proper response formatting
-        is_yes_no = any(q in question_lower for q in ["is there", "are there", "do you see", "can you see", "is it", "are the", "is this", "does this"])
-        is_what = "what" in question_lower
-        is_where = "where" in question_lower
-        is_how = "how" in question_lower
-        is_why = "why" in question_lower
-        is_when = "when" in question_lower
-        is_describe = "describe" in question_lower
-        
-        # Analyze radiological focus areas
-        focus_areas = []
-        for category, terms in self.finding_categories.items():
-            if any(term in question_lower for term in terms):
-                focus_areas.append(category)
-        
-        # Determine radiological modality context
-        if any(term in question_lower for term in ["chest", "lung", "heart", "pneumonia", "effusion", "thoracic", "pulmonary"]):
-            modality = "chest"
-        elif any(term in question_lower for term in ["bone", "fracture", "break", "joint", "dislocation", "skeletal"]):
-            modality = "bone"
-        elif any(term in question_lower for term in ["joint", "articulation", "knee", "elbow", "shoulder", "hip", "wrist", "ankle"]):
-            modality = "joint"
-        elif any(term in question_lower for term in ["abdomen", "liver", "spleen", "kidney", "intestine", "bowel", "stomach"]):
-            modality = "abdomen"
-        elif any(term in question_lower for term in ["spine", "vertebra", "disc", "spinal", "cervical", "lumbar", "thoracic"]):
-            modality = "spine"
-        elif any(term in question_lower for term in ["pediatric", "child", "infant", "baby", "adolescent", "newborn"]):
-            modality = "pediatric"
-        elif any(term in question_lower for term in ["emergency", "trauma", "urgent", "acute", "accident"]):
-            modality = "emergency"
-        elif any(term in question_lower for term in ["foreign", "body", "object", "device", "tube", "line", "catheter"]):
-            modality = "foreign_body"
-        elif any(term in question_lower for term in ["soft tissue", "muscle", "tendon", "ligament", "swelling", "edema"]):
-            modality = "soft_tissue"
-        else:
-            modality = "general"
-            
-        return {
-            "is_yes_no": is_yes_no,
-            "is_what": is_what,
-            "is_where": is_where,
-            "is_how": is_how,
-            "is_why": is_why,
-            "is_when": is_when,
-            "is_describe": is_describe,
-            "focus_areas": focus_areas,
-            "modality": modality
-        }
-    
-    def forward(self, pixel_values_list, input_ids, attention_mask):
-        """Forward pass through the model."""
-        # Get the first item from pixel_values_list
-        # This should be a 4D tensor with shape [batch_size, slices, channels, height, width]
-        # or it could be a list with a single item that is a 3D tensor
-        if isinstance(pixel_values_list, list):
-            stacked_pixel_values = pixel_values_list[0]
-        else:
-            stacked_pixel_values = pixel_values_list
-            
-        # Check if this is already stacked 3D data with proper batch dimension
-        # Expected shape: [batch_size, slices, channels, height, width]
-        if len(stacked_pixel_values.shape) == 5:
-            batch_size, num_slices, channels, height, width = stacked_pixel_values.shape
-            
-            # Reshape to process each slice through vision encoder
-            # [batch_size * slices, channels, height, width]
-            flat_pixel_values = stacked_pixel_values.view(batch_size * num_slices, channels, height, width)
-            
-            # Process all slices at once through vision encoder
-            vision_outputs = self.vision_encoder(pixel_values=flat_pixel_values)
-            
-            # Get last hidden state
-            # Shape: [batch_size * slices, seq_length, hidden_size]
-            vision_features = vision_outputs.last_hidden_state
-            
-            # Reshape back to 3D volume
-            # [batch_size, slices, seq_length, hidden_size]
-            seq_length, hidden_size = vision_features.shape[1], vision_features.shape[2]
-            vision_features_3d = vision_features.view(batch_size, num_slices, seq_length, hidden_size)
-            
-        else:
-            # Handle other input formats
-            # Create empty list for vision features
-            vision_features_list = []
-            
-            # If it's a 4D tensor with just one batch dimension, we'll use it as a single slice
-            if len(stacked_pixel_values.shape) == 4:
-                # Process single batch with single slice
-                vision_outputs = self.vision_encoder(pixel_values=stacked_pixel_values)
-                vision_features = vision_outputs.last_hidden_state
-                vision_features_list.append(vision_features)
-            else:
-                # Try to process whatever format we received
-                for pixel_values in pixel_values_list:
-                    # Ensure pixel_values has batch dimension
-                    if len(pixel_values.shape) == 3:  # [C, H, W]
-                        pixel_values = pixel_values.unsqueeze(0)  # Add batch dimension [1, C, H, W]
-                        
-                    vision_outputs = self.vision_encoder(pixel_values=pixel_values)
-                    vision_features_list.append(vision_outputs.last_hidden_state)
-            
-            # Ensure all feature maps have consistent dimensions
-            ref_shape = vision_features_list[0].shape
-            for i in range(len(vision_features_list)):
-                feat = vision_features_list[i]
-                # If batch size is missing, add it
-                if len(feat.shape) == 2:  # [seq_len, hidden_dim]
-                    feat = feat.unsqueeze(0)  # [1, seq_len, hidden_dim]
-                    vision_features_list[i] = feat
-                
-            # Stack vision features to create 3D representation
-            # [batch_size, slices, seq_length, hidden_size]
-            vision_features_3d = torch.stack(vision_features_list, dim=1)
-        
-        # Process stacked features through MedQFormer
-        med_query_features = self.medqformer(vision_features_3d)
-        
-        # Process through text encoder
-        text_outputs = self.text_encoder(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            encoder_hidden_states=med_query_features,
-            return_dict=True
-        )
-        
-        # Get text features for answer generation
-        text_features = text_outputs.last_hidden_state
-        
-        # For VQA task, classify to generate answer tokens
-        logits = self.vqa_classifier(text_features)
-        
-        # Boost medical term probabilities - increased boost for radiological terms
-        medical_boost = 1.3  # Increased from 1.2 for better radiological term prioritization
-        for batch_idx in range(logits.shape[0]):
-            for token_idx in self.medical_token_ids:
-                logits[batch_idx, :, token_idx] *= medical_boost
-        
-        return logits
-        
-    def generate_answer(self, image, question, max_length=150):
-        """
-        Generate an answer to a question about a medical image using a lightweight
-        approach for faster response generation.
+        Generate an answer to a question about a medical image using BLIP.
         
         Args:
             image: PIL Image of a medical scan
@@ -442,107 +150,75 @@ class MedBLIPModel(nn.Module):
         Returns:
             String answer to the question
         """
-        # Create pseudo-3D volume from 2D image
-        print("Processing image...")
-        image_3d = self.create_3d_from_2d(image)
-        
-        # Process all slices together as a batch
-        batch_pixel_values = []
-        
-        # Process each slice with the vision processor 
-        for i, slice_img in enumerate(image_3d):
-            slice_inputs = self.vision_processor(images=slice_img, return_tensors="pt")
-            # Extract pixel values without batch dimension
-            slice_pixel_values = slice_inputs.pixel_values.squeeze(0)
-            batch_pixel_values.append(slice_pixel_values)
+        # Check cache first for faster response
+        cached_answer = self._check_cache(image, question)
+        if cached_answer:
+            return cached_answer
             
-        # Stack all slices together along a new dimension (batch of slices)
-        stacked_pixel_values = torch.stack(batch_pixel_values, dim=0)
+        # Ensure image is properly formatted
+        image = self.create_3d_from_2d(image)
         
-        # Add batch dimension for model processing
-        stacked_pixel_values = stacked_pixel_values.unsqueeze(0)
+        # Enhanced question with basic prefix for medical context
+        enhanced_question = f"As a radiologist, {question}"
         
-        # Analyze question for better context
-        question_analysis = self._analyze_question_type(question)
-        modality = question_analysis["modality"]
+        # Process with BLIP model
+        print("Generating response with BLIP...")
+        inputs = self.processor(image, enhanced_question, return_tensors="pt").to(self.device)
         
-        # Determine the appropriate clinical prefix based on question analysis
-        prefix = self.clinical_prefixes[modality]  # Get contextual prefix
-        
-        # Create enhanced question with radiological context
-        context_prompt = "Evaluate this radiographic image with attention to bone and soft tissue structures. "
-        enhanced_question = f"Clinical Question: {prefix}{context_prompt}{question}"
-        
-        # Tokenize the enhanced question
-        text_inputs = self.text_tokenizer(
-            enhanced_question,
-            padding="max_length",
-            max_length=40,
-            truncation=True,
-            return_tensors="pt"
-        ).to(self.device)
-        
-        # Move tensor to device
-        stacked_pixel_values = stacked_pixel_values.to(self.device)
-        
-        # Forward pass to get logits
-        print("Generating response...")
+        # Generate answer
         with torch.no_grad():
-            logits = self(
-                pixel_values_list=[stacked_pixel_values],
-                input_ids=text_inputs.input_ids,
-                attention_mask=text_inputs.attention_mask
-            )
-        
-        # Fast decoding with greedy approach
-        generated_ids = []
-        current_ids = text_inputs.input_ids
-        temperature = 0.7  # Default temperature
-        
-        # Simple greedy generation (much faster)
-        for _ in range(max_length):
-            with torch.no_grad():
-                outputs = self(
-                    pixel_values_list=[stacked_pixel_values],
-                    input_ids=current_ids,
-                    attention_mask=torch.ones_like(current_ids).to(self.device)
-                )
-                
-                # Get the most likely next token
-                next_token_logits = outputs[:, -1, :]
-                next_token = torch.argmax(next_token_logits, dim=-1)
-                
-                # Stop if we predict end token
-                if next_token.item() == self.text_tokenizer.sep_token_id:
-                    break
-                    
-                generated_ids.append(next_token.item())
-                
-                # Reshape next token
-                next_token = next_token.unsqueeze(-1)
-                
-                # Concatenate
-                current_ids = torch.cat([current_ids, next_token], dim=1)
-        
-        # Decode the generated tokens
-        answer = self.text_tokenizer.decode(generated_ids, skip_special_tokens=True)
-        
-        # Simple post-processing
-        if len(answer.strip()) < 10:
-            # Fallback for very short answers
-            answer = "Based on this radiographic image, "
-            if "fracture" in question.lower():
-                answer += "there appears to be a fracture present. Clinical correlation is recommended."
-            elif "normal" in question.lower():
-                answer += "no significant abnormalities are detected. The study appears normal."
-            else:
-                answer += "I cannot provide a definitive assessment. Further clinical correlation is recommended."
+            outputs = self.model.generate(**inputs, max_length=max_length)
+            answer = self.processor.decode(outputs[0], skip_special_tokens=True)
         
         # Ensure proper sentence structure
         if answer and answer[-1] not in ['.', '!', '?']:
             answer += '.'
             
+        # Update cache with the generated answer
+        self._update_cache(image, question, answer)
+            
         return answer
+
+    # Add a simple cache check method
+    def _check_cache(self, image, question):
+        """Check if the answer is in cache"""
+        # Create a simple hash for the image using its size and mean pixel value
+        if isinstance(image, Image.Image):
+            img_array = np.array(image)
+            img_hash = f"{img_array.shape}_{np.mean(img_array):.2f}"
+        else:
+            img_hash = "unknown_image"
+            
+        # Create cache key
+        cache_key = f"{img_hash}_{question}"
+        
+        # Return cached answer if available
+        if cache_key in self.answer_cache:
+            print("Using cached answer")
+            return self.answer_cache[cache_key]
+        
+        return None
+        
+    # Update cache method
+    def _update_cache(self, image, question, answer):
+        """Update the answer cache"""
+        # Create a simple hash for the image
+        if isinstance(image, Image.Image):
+            img_array = np.array(image)
+            img_hash = f"{img_array.shape}_{np.mean(img_array):.2f}"
+        else:
+            img_hash = "unknown_image"
+            
+        # Create cache key
+        cache_key = f"{img_hash}_{question}"
+        
+        # Store in cache (limit cache size to 100 entries)
+        if len(self.answer_cache) >= 100:
+            # Remove oldest entry
+            oldest_key = next(iter(self.answer_cache))
+            del self.answer_cache[oldest_key]
+            
+        self.answer_cache[cache_key] = answer
 
 class XrayVQAModel:
     def __init__(self):
@@ -587,7 +263,7 @@ class XrayVQAModel:
     
     def preprocess_image(self, image_path):
         """
-        Simplified preprocessing for X-ray imaging with minimal operations
+        Ultra-fast preprocessing for X-ray imaging with minimal operations
         
         Args:
             image_path (str): Path to the X-ray image file
@@ -597,22 +273,38 @@ class XrayVQAModel:
         """
         # Handle DICOM format
         if image_path.lower().endswith('.dcm'):
-            dicom = pydicom.dcmread(image_path)
-            image = dicom.pixel_array.astype(float)
-            
-            # Normalize to 0-1 range
-            image = (image - image.min()) / (image.max() - image.min())
-            
-            # Convert to uint8 and to RGB (DICOM is typically grayscale)
-            image = (image * 255).astype(np.uint8)
-            image = np.stack([image] * 3, axis=-1)  # Convert to RGB
-            
-            return Image.fromarray(image)
+            try:
+                dicom = pydicom.dcmread(image_path)
+                image = dicom.pixel_array.astype(float)
+                
+                # Simple normalization
+                image = (image - image.min()) / (image.max() - image.min())
+                
+                # Convert to uint8 and to RGB
+                image = (image * 255).astype(np.uint8)
+                image = np.stack([image] * 3, axis=-1)  # Convert to RGB
+                
+                return Image.fromarray(image)
+            except Exception as e:
+                print(f"DICOM processing error: {e}. Falling back to basic processing.")
+                # Fall back to basic processing if DICOM fails
+                try:
+                    return Image.open(image_path).convert('RGB')
+                except:
+                    # Last resort - create a blank image with error text
+                    blank = Image.new('RGB', (224, 224), color=(0, 0, 0))
+                    return blank
         
         # Handle regular image formats (JPEG, PNG, etc.)
         else:
-            image = Image.open(image_path).convert('RGB')
-            return image
+            try:
+                # Fast direct loading
+                return Image.open(image_path).convert('RGB')
+            except Exception as e:
+                print(f"Image processing error: {e}. Creating blank image.")
+                # Last resort - create a blank image
+                blank = Image.new('RGB', (224, 224), color=(0, 0, 0))
+                return blank
     
     def _enhance_question_with_radiological_context(self, question):
         """Simple question enhancement for faster processing"""
@@ -630,7 +322,7 @@ class XrayVQAModel:
         Returns:
             str: Radiological assessment answering the question
         """
-        print(f"\n📋 Analyzing X-ray")
+        print(f"\n📋 Fast analysis of X-ray")
         print(f"📝 Question: \"{question}\"")
         
         # Handle empty or None question
@@ -641,11 +333,17 @@ class XrayVQAModel:
         enhanced_question = self._enhance_question_with_radiological_context(question)
         
         # Preprocess the image with simplified pipeline
-        print(f"🖼️  Preprocessing radiographic image")
+        print(f"🖼️  Fast preprocessing of radiographic image")
         image = self.preprocess_image(image_path)
         
+        # Check if we have a cached answer
+        cached_answer = self.medblip_model._check_cache(image, enhanced_question)
+        if cached_answer:
+            print("🔄 Using cached answer for faster response")
+            return cached_answer
+        
         # Generate answer
-        print("🔬 Analyzing the radiographic study...")
+        print("🔬 Fast analysis in progress...")
         answer = self.medblip_model.generate_answer(image, enhanced_question)
         return answer
     

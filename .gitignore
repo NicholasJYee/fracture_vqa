@@ -11,3 +11,4 @@ hf_*
 .gradio/
 uploads/
 temp/
+*.env

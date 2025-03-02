@@ -9,7 +9,11 @@ from io import BytesIO
 import pydicom
 from skimage import exposure
 import tempfile
+from dotenv import load_dotenv
 from transformers import BlipProcessor, BlipForQuestionAnswering, ViTImageProcessor, ViTModel, BertTokenizer, BertModel
+
+# Load environment variables at module level
+load_dotenv()
 
 class MedQFormer3D(nn.Module):
     """
@@ -101,11 +105,23 @@ class MedBLIPModel(nn.Module):
         self.device = device
         self.num_slices = num_slices
         
-        # Use BLIP model for faster processing
-        self.model_name = "Salesforce/blip-vqa-base"
-        print(f"Loading BLIP model: {self.model_name}")
-        self.processor = BlipProcessor.from_pretrained(self.model_name)
-        self.model = BlipForQuestionAnswering.from_pretrained(self.model_name)
+        # Check for Hugging Face token in environment variables
+        self.hf_token = os.getenv("HUGGINGFACE_TOKEN")
+        
+        # Use BLIP model for VQA
+        model_id = "Salesforce/blip-vqa-base"
+        print(f"Loading BLIP model: {model_id}")
+        
+        # Use auth token if available when loading models
+        auth_token = self.hf_token if self.hf_token else None
+        if auth_token:
+            print(f"Using Hugging Face authentication token: {auth_token[:4]}...{auth_token[-4:]}")
+            self.processor = BlipProcessor.from_pretrained(model_id, use_auth_token=auth_token)
+            self.model = BlipForQuestionAnswering.from_pretrained(model_id, use_auth_token=auth_token)
+        else:
+            print("No Hugging Face token found, loading models without authentication")
+            self.processor = BlipProcessor.from_pretrained(model_id)
+            self.model = BlipForQuestionAnswering.from_pretrained(model_id)
         
         # Move model to device
         self.model.to(device)

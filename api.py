@@ -14,6 +14,18 @@ import numpy as np
 from typing import List, Optional
 import shutil
 import logging
+from dotenv import load_dotenv
+
+# Load environment variables
+print("Loading environment variables from .env file...")
+load_dotenv()
+
+# Check for Hugging Face token
+hf_token = os.getenv("HUGGINGFACE_TOKEN")
+if hf_token:
+    print(f"Hugging Face token loaded: {hf_token[:4]}...{hf_token[-4:]}")
+else:
+    print("No Hugging Face token found in .env file")
 
 # Configure logging
 logging.basicConfig(

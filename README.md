@@ -16,8 +16,13 @@ A Python-based chatbot that can answer questions about X-ray medical images usin
    ```
    pip install -r requirements.txt
    ```
-3. Set up environment variables (optional):
-   Create a `.env` file with your API keys if using third-party services
+3. Set up environment variables:
+   - Copy `.env.example` to `.env`
+   - Add your Hugging Face API token to access gated datasets:
+     ```
+     HUGGINGFACE_TOKEN=your_huggingface_token_here
+     ```
+   - You can get your token from [Hugging Face settings page](https://huggingface.co/settings/tokens)
 
 ## Usage
 
@@ -58,6 +63,19 @@ This application uses a fine-tuned vision-language model specifically adapted fo
 - `model.py`: VQA model implementation
 - `utils/`: Helper functions for image processing, etc.
 - `examples/`: Example X-ray images for testing
+- `.env`: Environment variables configuration (Hugging Face token, etc.)
+
+## Accessing Gated Datasets
+
+To work with gated datasets from Hugging Face Hub:
+
+1. Create a Hugging Face account if you don't have one
+2. Generate an access token from your [Hugging Face settings](https://huggingface.co/settings/tokens)
+3. Add the token to your `.env` file:
+   ```
+   HUGGINGFACE_TOKEN=your_token_here
+   ```
+4. The application will automatically use this token when accessing models or datasets
 
 ## Limitations
 

@@ -137,3 +137,14 @@ The system provides a REST API for integration:
 - `GET /images` - List all uploaded images
 - `DELETE /images/{filename}` - Delete a specific image
 - `POST /enhance` - Enhance the contrast of an image 
+
+---
+title: Ortho-LLaVA
+emoji: 🏥
+colorFrom: blue
+colorTo: green
+sdk: gradio
+sdk_version: "4.19.2"
+app_file: app.py
+pinned: false
+---

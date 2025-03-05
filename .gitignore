@@ -1,0 +1,11 @@
+.DS_Store
+.vscode/
+__pycache__/
+env/
+hf_*
+*.pyc
+*.pyo
+uploads/
+temp/
+cache/
+*api.log

@@ -108,4 +108,32 @@ This application uses LLaVA (Large Language and Vision Assistant) through the Ol
 - If you experience timeout errors:
   - For connection timeouts: Check your network connection and ensure Ollama is running
   - For read timeouts: Complex X-rays or larger models may need more time. You can increase the timeout in `model.py` by changing the `read_timeout` value in the `OllamaLLaVAModel` class.
-  - For very large models: Consider using a smaller model or increasing your system resources 
+  - For very large models: Consider using a smaller model or increasing your system resources
+
+## Hugging Face Spaces Deployment
+
+For deploying on Hugging Face Spaces, use these special files:
+- `app-huggingface.py` - Optimized Gradio interface for Spaces
+- `api-huggingface.py` - API backend for Spaces
+- `requirements-huggingface.txt` - Dependencies for Spaces
+- `Dockerfile` - Container configuration for Spaces
+
+To deploy:
+1. Create a new Space on Hugging Face
+2. Select Dockerfile as the Space type
+3. Upload all files to the Space
+4. (Optional) Configure environment variables for external Ollama server
+
+For detailed instructions, see the [README-huggingface.md](README-huggingface.md) file.
+
+## API Reference
+
+The system provides a REST API for integration:
+
+- `GET /status` - Check API status
+- `POST /upload` - Upload an X-ray image
+- `POST /ask` - Ask a question about an uploaded image
+- `GET /images/{filename}` - Retrieve a specific image
+- `GET /images` - List all uploaded images
+- `DELETE /images/{filename}` - Delete a specific image
+- `POST /enhance` - Enhance the contrast of an image 

@@ -47,10 +47,6 @@ else:
 print(f"Selected device: {device}")
 print("="*50 + "\n")
 
-# Initialize directories
-create_directory_if_not_exists("uploads")
-create_directory_if_not_exists("temp")
-
 # Initialize the model - with error handling for Hugging Face environment
 try:
     # Pass the device explicitly to the model initialization

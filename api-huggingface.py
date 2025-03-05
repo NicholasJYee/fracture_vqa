@@ -63,7 +63,6 @@ logger.info("="*50)
 
 # Initialize directories
 create_directory_if_not_exists("uploads")
-create_directory_if_not_exists("examples")
 create_directory_if_not_exists("temp")
 
 # Initialize model with Ollama URL - with error handling for Hugging Face environment
@@ -285,7 +284,7 @@ async def list_images(directory: Optional[str] = "uploads"):
     """
     try:
         # Validate directory to prevent directory traversal
-        if directory not in ["uploads", "examples", "temp"]:
+        if directory not in ["uploads", "temp"]:
             raise HTTPException(status_code=400, detail="Invalid directory specified")
         
         # Get list of files

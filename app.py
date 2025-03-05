@@ -9,6 +9,14 @@ from PIL import Image
 import pydicom
 import numpy as np
 import traceback
+import json
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Get Ollama URL from environment variable or use default
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 # Enable MPS (Metal Performance Shaders) for macOS if available
 if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -18,8 +26,8 @@ if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
 # Initialize directories
 create_directory_if_not_exists("uploads")
 
-# Initialize the model
-model = XrayVQAModel()
+# Initialize the model with Ollama URL
+model = XrayVQAModel(ollama_url=OLLAMA_URL)
 
 # Keep chat history
 chat_history = []

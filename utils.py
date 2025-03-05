@@ -5,7 +5,6 @@ import pydicom
 import cv2
 import numpy as np
 from PIL import Image
-import matplotlib.pyplot as plt
 from io import BytesIO
 import base64
 import re
@@ -218,75 +217,30 @@ def enhance_xray_for_display(image_path):
     Returns:
         str: Path to the enhanced image
     """
-    # Handle DICOM format
-    if image_path.lower().endswith('.dcm'):
-        dicom = pydicom.dcmread(image_path)
-        image = dicom.pixel_array.astype(float)
-        
-        # Normalize to 0-1 range
-        image = (image - image.min()) / (image.max() - image.min())
-    else:
-        # Regular image format
-        image = np.array(Image.open(image_path).convert('L')).astype(float) / 255.0
-    
-    # Apply CLAHE for contrast enhancement
-    image = (image * 255).astype(np.uint8)
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    enhanced = clahe.apply(image)
-    
-    # Save enhanced image
-    output_path = f"{os.path.splitext(image_path)[0]}_enhanced.png"
-    cv2.imwrite(output_path, enhanced)
-    
-    return output_path
-
-def generate_heatmap(image_path, regions_of_interest=None):
-    """
-    Generate a heatmap overlay for regions of interest in an X-ray
-    
-    Args:
-        image_path (str): Path to the X-ray image
-        regions_of_interest (list): List of (x, y, w, h) tuples for ROIs
-        
-    Returns:
-        str: Path to the heatmap image
-    """
-    # If no ROIs provided, return the original image
-    if not regions_of_interest:
-        return image_path
-    
     # Load image
     if image_path.lower().endswith('.dcm'):
-        dicom = pydicom.dcmread(image_path)
-        image = dicom.pixel_array.astype(np.uint8)
+        try:
+            dicom = pydicom.dcmread(image_path)
+            image = dicom.pixel_array.astype(np.uint8)
+        except Exception as e:
+            print(f"Error reading DICOM file: {e}")
+            return image_path
     else:
-        image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        try:
+            image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+            if image is None:
+                print(f"Failed to load image from {image_path}")
+                return image_path
+        except Exception as e:
+            print(f"Error reading image file: {e}")
+            return image_path
     
-    # Create a heatmap overlay
-    heatmap = np.zeros_like(image)
+    # Apply CLAHE for better contrast
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(image)
     
-    # Add heat to regions of interest
-    for x, y, w, h in regions_of_interest:
-        cv2.rectangle(heatmap, (x, y), (x+w, y+h), 255, -1)
-    
-    # Blur the heatmap for a smoother look
-    heatmap = cv2.GaussianBlur(heatmap, (51, 51), 0)
-    
-    # Normalize heatmap
-    heatmap = cv2.normalize(heatmap, None, 0, 255, cv2.NORM_MINMAX)
-    
-    # Apply colormap
-    heatmap_colored = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
-    
-    # Convert grayscale image to RGB
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-    
-    # Blend images
-    alpha = 0.7
-    overlay = cv2.addWeighted(image_rgb, 1-alpha, heatmap_colored, alpha, 0)
-    
-    # Save result
-    output_path = f"{os.path.splitext(image_path)[0]}_heatmap.png"
-    cv2.imwrite(output_path, overlay)
+    # Save the enhanced image
+    output_path = f"{os.path.splitext(image_path)[0]}_enhanced.png"
+    cv2.imwrite(output_path, enhanced)
     
     return output_path 

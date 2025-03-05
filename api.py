@@ -14,6 +14,13 @@ import numpy as np
 from typing import List, Optional
 import shutil
 import logging
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Get Ollama URL from environment variable or use default
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 # Configure logging
 logging.basicConfig(
@@ -31,10 +38,11 @@ create_directory_if_not_exists("uploads")
 create_directory_if_not_exists("examples")
 create_directory_if_not_exists("temp")
 
-# Initialize model
-model = XrayVQAModel()
+# Initialize model with Ollama URL
+model = XrayVQAModel(ollama_url=OLLAMA_URL)
 device_type = "CUDA" if str(model.device) == "cuda" else "MPS" if str(model.device) == "mps" else "CPU"
 logger.info(f"Model initialized successfully using device: {device_type} ({model.device})")
+logger.info(f"Using Ollama API at: {OLLAMA_URL}")
 
 # Create FastAPI app
 app = FastAPI(

@@ -1,157 +1,78 @@
 import os
 import torch
-from torch import nn
 import requests
 from PIL import Image
 import numpy as np
 import cv2
 from io import BytesIO
 import pydicom
-from skimage import exposure
-import tempfile
 import gc  # For explicit garbage collection
-from transformers import BlipProcessor, BlipForQuestionAnswering, ViTImageProcessor, ViTModel, BertTokenizer, BertModel
+import json
+import base64
+import io
 
-class MedQFormer3D(nn.Module):
+class OllamaLLaVAModel:
     """
-    MedQFormer module adapted from the MedBLIP paper (https://arxiv.org/abs/2305.10799)
-    This module bridges the visual features from a vision encoder with a language model
-    for medical image understanding with pseudo-3D features.
+    Implementation of an X-ray VQA model using Ollama API with LLaVA model.
+    This uses the Ollama API to serve the LLaVA model for visual question answering.
     """
-    def __init__(self, vision_hidden_size=768, text_hidden_size=768, num_query_tokens=8, num_slices=3, device="cuda"):
-        super().__init__()
-        self.num_query_tokens = num_query_tokens
-        self.num_slices = num_slices
-        self.device = device
-        
-        # Learnable query tokens that will be enhanced with visual information
-        self.query_tokens = nn.Parameter(torch.zeros(1, num_query_tokens, text_hidden_size, device=device))
-        torch.nn.init.normal_(self.query_tokens, std=0.02)
-        
-        # Projection from vision encoder space to text encoder space
-        self.vision_proj = nn.Linear(vision_hidden_size, text_hidden_size)
-        
-        # 3D spatial fusion module - convolves across slices to create 3D context
-        self.spatial_fusion = nn.Sequential(
-            nn.Conv1d(num_slices, 1, kernel_size=3, padding=1),
-            nn.GELU()
-        )
-        
-        # Cross-attention layers to blend visual and query token features
-        self.cross_attention = nn.MultiheadAttention(
-            embed_dim=text_hidden_size,
-            num_heads=12,
-            dropout=0.1,
-            batch_first=True
-        )
-        
-        # LayerNorm and FFN for query tokens
-        self.layer_norm1 = nn.LayerNorm(text_hidden_size)
-        self.layer_norm2 = nn.LayerNorm(text_hidden_size)
-        self.ffn = nn.Sequential(
-            nn.Linear(text_hidden_size, text_hidden_size * 4),
-            nn.GELU(),
-            nn.Linear(text_hidden_size * 4, text_hidden_size)
-        )
-        
-        # Move entire model to device
-        self.to(device)
-    
-    def forward(self, vision_features_3d):
-        # Ensure input is on the correct device
-        vision_features_3d = vision_features_3d.to(self.device)
-        
-        # vision_features_3d shape: [batch_size, num_slices, seq_length, hidden_size]
-        batch_size, num_slices, seq_length, hidden_size = vision_features_3d.shape
-        
-        # Reshape for processing
-        vision_features_flat = vision_features_3d.view(batch_size * num_slices, seq_length, hidden_size)
-        
-        # Project all slice features to text space
-        vision_features_proj = self.vision_proj(vision_features_flat)
-        vision_features_proj = vision_features_proj.view(batch_size, num_slices, seq_length, -1)
-        
-        # Fuse 3D information across slices using 1D convolution
-        # Transpose for conv1d: [batch, seq_length, slices, hidden_size]
-        vision_features_proj = vision_features_proj.permute(0, 2, 1, 3)
-        vision_features_proj = vision_features_proj.reshape(batch_size * seq_length, num_slices, -1)
-        vision_features_fused = self.spatial_fusion(vision_features_proj)
-        vision_features_fused = vision_features_fused.squeeze(1)
-        vision_features_fused = vision_features_fused.reshape(batch_size, seq_length, -1)
-        
-        # Expand query tokens to match batch size
-        query_tokens = self.query_tokens.expand(batch_size, -1, -1)
-        
-        # Cross-attention: query tokens attend to 3D-fused vision features
-        query_tokens = self.layer_norm1(query_tokens)
-        vision_features_fused = self.layer_norm1(vision_features_fused)
-        
-        # Self-attention mechanism
-        query_tokens_attn, _ = self.cross_attention(
-            query=query_tokens,
-            key=vision_features_fused,
-            value=vision_features_fused
-        )
-        
-        # Residual connection and FFN
-        query_tokens = query_tokens + query_tokens_attn
-        query_tokens = query_tokens + self.ffn(self.layer_norm2(query_tokens))
-        
-        return query_tokens
-
-class MedBLIPModel(nn.Module):
-    """
-    Medical BLIP implementation for X-ray analysis using the original BLIP architecture.
-    This model leverages BLIP's integrated vision-language approach for more efficient processing.
-    """
-    def __init__(self, device, num_slices=3):
+    def __init__(self, device="cpu", ollama_url="http://localhost:11434"):
         super().__init__()
         self.device = device
-        self.num_slices = num_slices
-        
-        # Use BLIP model for faster processing
-        self.model_name = "Salesforce/blip-vqa-base"
-        print(f"Loading BLIP model: {self.model_name}")
-        self.processor = BlipProcessor.from_pretrained(self.model_name)
-        self.model = BlipForQuestionAnswering.from_pretrained(self.model_name)
-        
-        # Move model to device
-        self.model.to(device)
+        self.ollama_url = ollama_url
+        self.model_name = "llava"  # Using LLaVA as the model
         
         # Cache for answers to improve response time for repeated questions
         self.answer_cache = {}
         
-        # List of medical terms for better medical context
-        self.medical_terms = [
-            "fracture", "break", "pneumonia", "opacity", "normal", 
-            "abnormal", "effusion", "pneumothorax", "dislocation"
-        ]
+        print(f"Initialized Ollama LLaVA Model with API endpoint: {ollama_url}")
+        print(f"Using model: {self.model_name}")
         
-        # Move entire model to device
-        self.to(device)
+        # Test the Ollama connection
+        try:
+            self._test_ollama_connection()
+            print("✅ Successfully connected to Ollama API")
+        except Exception as e:
+            print(f"❌ Failed to connect to Ollama API: {str(e)}")
+            print("Please make sure Ollama is running with LLaVA model downloaded")
+            print("You can install it with: 'ollama pull llava'")
     
-    def preprocess_image_for_model(self, image):
-        """Simple preprocessing for images"""
-        # Check if it's a PIL image, if so convert to numpy
-        if isinstance(image, Image.Image):
-            return image
-        else:
-            # Convert numpy array to PIL
-            if len(image.shape) == 2:  # If grayscale
-                image = np.stack([image] * 3, axis=2)
-            return Image.fromarray(image.astype(np.uint8))
-        
-    def create_3d_from_2d(self, image):
-        """
-        Create a simplified representation from a 2D image with minimal processing.
-        For BLIP, we only need the original image.
-        """
-        # Return the original image since BLIP processes a single image
-        return self.preprocess_image_for_model(image)
+    def _test_ollama_connection(self):
+        """Test connection to Ollama API"""
+        try:
+            response = requests.get(f"{self.ollama_url}/api/tags")
+            if response.status_code == 200:
+                models = response.json().get('models', [])
+                llava_available = any(model.get('name', '').startswith('llava') for model in models)
+                
+                if not llava_available:
+                    print("LLaVA model not found in Ollama. You may need to pull it with 'ollama pull llava'")
+            else:
+                print(f"Error connecting to Ollama API: {response.status_code}")
+        except Exception as e:
+            raise Exception(f"Failed to connect to Ollama API: {str(e)}")
     
-    def generate_answer(self, image, question, max_length=50):
+    def _encode_image_to_base64(self, image):
+        """Convert PIL image to base64 string for Ollama API"""
+        # Ensure image is a PIL Image
+        if not isinstance(image, Image.Image):
+            if isinstance(image, np.ndarray):
+                image = Image.fromarray(image)
+            else:
+                raise ValueError("Image must be a PIL Image or numpy array")
+                
+        # Convert to RGB if not already
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+            
+        # Convert to base64
+        buffered = io.BytesIO()
+        image.save(buffered, format="JPEG")
+        return base64.b64encode(buffered.getvalue()).decode("utf-8")
+    
+    def generate_answer(self, image, question, max_length=500):
         """
-        Generate an answer to a question about a medical image using BLIP.
+        Generate an answer to a question about a medical image using Ollama's LLaVA.
         
         Args:
             image: PIL Image of a medical scan
@@ -166,34 +87,57 @@ class MedBLIPModel(nn.Module):
         if cached_answer:
             return cached_answer
             
-        # Ensure image is properly formatted
-        image = self.create_3d_from_2d(image)
+        # Enhanced question with medical context
+        enhanced_question = f"As a radiologist, please analyze this X-ray image and {question}"
         
-        # Enhanced question with basic prefix for medical context
-        enhanced_question = f"As a radiologist, {question}"
+        # Encode image to base64
+        image_base64 = self._encode_image_to_base64(image)
         
-        # Process with BLIP model
-        print("Generating response with BLIP...")
-        inputs = self.processor(image, enhanced_question, return_tensors="pt").to(self.device)
+        # Prepare the request to Ollama API
+        prompt_data = {
+            "model": self.model_name,
+            "prompt": enhanced_question,
+            "images": [image_base64],
+            "stream": False,
+            "options": {
+                "temperature": 0.2,  # Lower temperature for more deterministic medical answers
+                "num_predict": max_length
+            }
+        }
         
-        # Generate answer with CUDA optimizations
-        with torch.cuda.amp.autocast() if str(self.device) == "cuda" else torch.no_grad():
-            outputs = self.model.generate(**inputs, max_length=max_length)
-            answer = self.processor.decode(outputs[0], skip_special_tokens=True)
+        print("Sending request to Ollama API...")
         
-        # Ensure proper sentence structure
-        if answer and answer[-1] not in ['.', '!', '?']:
-            answer += '.'
+        try:
+            # Call Ollama API
+            response = requests.post(
+                f"{self.ollama_url}/api/generate", 
+                json=prompt_data,
+                timeout=30
+            )
             
-        # Update cache with the generated answer
-        self._update_cache(image, question, answer)
-        
-        # Free up CUDA memory
-        if str(self.device) == "cuda":
-            torch.cuda.empty_cache()
-            
-        return answer
-
+            # Handle response
+            if response.status_code == 200:
+                result = response.json()
+                answer = result.get("response", "")
+                
+                # Ensure proper sentence structure
+                if answer and answer[-1] not in ['.', '!', '?']:
+                    answer += '.'
+                    
+                # Update cache with the generated answer
+                self._update_cache(image, question, answer)
+                
+                return answer
+            else:
+                error_msg = f"Error from Ollama API: {response.status_code} - {response.text}"
+                print(error_msg)
+                return f"Error generating answer: {error_msg}"
+                
+        except Exception as e:
+            error_msg = f"Exception while calling Ollama API: {str(e)}"
+            print(error_msg)
+            return f"Error generating answer: {error_msg}"
+    
     # Add a simple cache check method
     def _check_cache(self, image, question):
         """Check if the answer is in cache"""
@@ -236,10 +180,10 @@ class MedBLIPModel(nn.Module):
         self.answer_cache[cache_key] = answer
 
 class XrayVQAModel:
-    def __init__(self):
+    def __init__(self, ollama_url="http://localhost:11434"):
         """Initialize the model and processor"""
         print("\n" + "="*80)
-        print("X-RAY VISUAL QUESTION ANSWERING MODEL INITIALIZATION")
+        print("X-RAY VISUAL QUESTION ANSWERING MODEL INITIALIZATION (OLLAMA + LLaVA)")
         print("="*80)
         
         # Enhanced device selection with better CUDA support
@@ -271,17 +215,16 @@ class XrayVQAModel:
         
         print(f"Device: {self.device}")
         
-        # Initialize lightweight model for medical VQA
+        # Initialize Ollama with LLaVA model
         try:
-            print("\nLoading lightweight model for medical VQA...")
-            print("MODEL SELECTION: Lightweight VQA model")
-            print("Using smaller models for faster predictions")
+            print("\nInitializing Ollama with LLaVA model...")
+            print("MODEL SELECTION: Ollama LLaVA for medical VQA")
             
-            # Initialize our model with device
-            self.medblip_model = MedBLIPModel(device=self.device, num_slices=3)
+            # Initialize Ollama LLaVA model
+            self.ollama_model = OllamaLLaVAModel(device=self.device, ollama_url=ollama_url)
             
-            self.model_type = "lightweight-radiological"
-            print(f"✅ Successfully loaded lightweight model with basic radiological processing")
+            self.model_type = "ollama-llava"
+            print(f"✅ Successfully initialized Ollama LLaVA model for medical VQA")
         except Exception as e:
             error_msg = f"❌ Failed to initialize model: {str(e)}"
             print(error_msg)
@@ -290,6 +233,8 @@ class XrayVQAModel:
         print("\nACTIVE MODEL INFORMATION:")
         print(f"• Model Type: {self.model_type}")
         print(f"• Running on: {self.device}")
+        print(f"• Ollama API: {ollama_url}")
+        print(f"• Model: {self.ollama_model.model_name}")
         print("="*80 + "\n")
         
         # Set up the cache directory
@@ -357,7 +302,7 @@ class XrayVQAModel:
         Returns:
             str: Radiological assessment answering the question
         """
-        print(f"\n📋 Fast analysis of X-ray")
+        print(f"\n📋 Analysis of X-ray using Ollama LLaVA")
         print(f"📝 Question: \"{question}\"")
         
         # Handle empty or None question
@@ -372,14 +317,14 @@ class XrayVQAModel:
         image = self.preprocess_image(image_path)
         
         # Check if we have a cached answer
-        cached_answer = self.medblip_model._check_cache(image, enhanced_question)
+        cached_answer = self.ollama_model._check_cache(image, enhanced_question)
         if cached_answer:
             print("🔄 Using cached answer for faster response")
             return cached_answer
         
         # Generate answer
-        print("🔬 Fast analysis in progress...")
-        answer = self.medblip_model.generate_answer(image, enhanced_question)
+        print("🔬 Analyzing with Ollama LLaVA...")
+        answer = self.ollama_model.generate_answer(image, enhanced_question)
         
         # Clear any residual CUDA memory
         if str(self.device).startswith("cuda"):
@@ -432,8 +377,8 @@ class XrayVQAModel:
         image = Image.fromarray(img_array)
         
         # Use our model to generate an answer
-        print("🔬 Analyzing the X-ray...")
-        answer = self.medblip_model.generate_answer(image, question)
+        print("🔬 Analyzing the X-ray with Ollama LLaVA...")
+        answer = self.ollama_model.generate_answer(image, question)
         
         # Clear any residual CUDA memory
         if str(self.device).startswith("cuda"):
@@ -446,7 +391,7 @@ class XrayVQAModel:
 # Example usage
 if __name__ == "__main__":
     print("\n" + "="*80)
-    print("X-RAY VISUAL QUESTION ANSWERING DEMO")
+    print("X-RAY VISUAL QUESTION ANSWERING DEMO (OLLAMA + LLaVA)")
     print("="*80)
     
     # Initialize the model

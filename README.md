@@ -1,3 +1,15 @@
+---
+title: Fracture VQA - X-ray Visual Question Answering
+emoji: 🩻
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+license: mit
+app_port: 7860
+app_file: app-huggingface.py
+---
+
 # Fracture Visual Question Answering
 
 A system for conducting visual question answering on radiological images (X-rays).
@@ -61,8 +73,6 @@ For deploying on Hugging Face Spaces, use these special files:
 - `api-huggingface.py` - API backend for Spaces
 - `requirements-huggingface.txt` - Dependencies for Spaces
 - `Dockerfile` - Container configuration for Spaces
-- `space.yml` - Configuration for Hugging Face Spaces
-- `README-huggingface.md` - Documentation for Hugging Face users
 
 To deploy:
 1. Create a new Space on Hugging Face

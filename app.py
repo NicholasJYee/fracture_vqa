@@ -9,18 +9,14 @@ from PIL import Image
 import pydicom
 import numpy as np
 import traceback
+import json
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-print("Loading environment variables from .env file...")
+# Load environment variables
 load_dotenv()
 
-# Check for Hugging Face token if needed
-hf_token = os.getenv("HUGGINGFACE_TOKEN")
-if hf_token:
-    print(f"Hugging Face token loaded: {hf_token[:4]}...{hf_token[-4:]}")
-else:
-    print("No Hugging Face token found in .env file")
+# Get Ollama URL from environment variable or use default
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 # Enable MPS (Metal Performance Shaders) for macOS if available
 if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -29,10 +25,9 @@ if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
 
 # Initialize directories
 create_directory_if_not_exists("uploads")
-create_directory_if_not_exists("examples")
 
-# Initialize the model
-model = XrayVQAModel()
+# Initialize the model with Ollama URL
+model = XrayVQAModel(ollama_url=OLLAMA_URL)
 
 # Keep chat history
 chat_history = []

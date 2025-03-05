@@ -17,6 +17,7 @@ import logging
 from dotenv import load_dotenv
 
 # Load environment variables
+<<<<<<< HEAD
 print("Loading environment variables from .env file...")
 load_dotenv()
 
@@ -26,6 +27,12 @@ if hf_token:
     print(f"Hugging Face token loaded: {hf_token[:4]}...{hf_token[-4:]}")
 else:
     print("No Hugging Face token found in .env file")
+=======
+load_dotenv()
+
+# Get Ollama URL from environment variable or use default
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+>>>>>>> efc448571e4c844db60714480a6fba315f800236
 
 # Configure logging
 logging.basicConfig(
@@ -43,10 +50,11 @@ create_directory_if_not_exists("uploads")
 create_directory_if_not_exists("examples")
 create_directory_if_not_exists("temp")
 
-# Initialize model
-model = XrayVQAModel()
+# Initialize model with Ollama URL
+model = XrayVQAModel(ollama_url=OLLAMA_URL)
 device_type = "CUDA" if str(model.device) == "cuda" else "MPS" if str(model.device) == "mps" else "CPU"
 logger.info(f"Model initialized successfully using device: {device_type} ({model.device})")
+logger.info(f"Using Ollama API at: {OLLAMA_URL}")
 
 # Create FastAPI app
 app = FastAPI(

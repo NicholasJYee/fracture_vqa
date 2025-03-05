@@ -10,13 +10,14 @@ import gc  # For explicit garbage collection
 import json
 import base64
 import io
+import time
 
 class OllamaLLaVAModel:
     """
     Implementation of an X-ray VQA model using Ollama API with LLaVA model.
     This uses the Ollama API to serve the LLaVA model for visual question answering.
     """
-    def __init__(self, device="cpu", ollama_url="http://localhost:11434"):
+    def __init__(self, device="cpu", ollama_url="http://localhost:11434", cache_dir=None):
         super().__init__()
         self.device = device
         self.ollama_url = ollama_url
@@ -28,6 +29,12 @@ class OllamaLLaVAModel:
         
         # Cache for answers to improve response time for repeated questions
         self.answer_cache = {}
+        
+        # Set cache directory
+        self.cache_dir = cache_dir
+        if self.cache_dir:
+            print(f"OllamaLLaVAModel using cache directory: {self.cache_dir}")
+            os.makedirs(self.cache_dir, exist_ok=True)
         
         print(f"Initialized Ollama LLaVA Model with API endpoint: {ollama_url}")
         print(f"Using model: {self.model_name}")
@@ -147,53 +154,68 @@ class OllamaLLaVAModel:
             print(error_msg)
             return f"Error generating answer: {error_msg}"
     
-    # Add a simple cache check method
     def _check_cache(self, image, question):
-        """Check if the answer is in cache"""
-        # Create a simple hash for the image using its size and mean pixel value
-        if isinstance(image, Image.Image):
-            img_array = np.array(image)
-            img_hash = f"{img_array.shape}_{np.mean(img_array):.2f}"
-        else:
-            img_hash = "unknown_image"
+        """
+        Check if we already have a cached answer for this image+question
+        """
+        if not self.cache_dir:
+            return None
             
-        # Create cache key
-        cache_key = f"{img_hash}_{question}"
-        
-        # Return cached answer if available
-        if cache_key in self.answer_cache:
-            print("Using cached answer")
-            return self.answer_cache[cache_key]
-        
-        return None
-        
-    # Update cache method
+        try:
+            # Create a hash of the image and question to use as a key
+            # We use a simple hash here - a production system would use a more robust approach
+            img_bytes = self._encode_image_to_base64(image)
+            cache_key = f"{hash(img_bytes)}-{hash(question)}"
+            cache_file = os.path.join(self.cache_dir, f"response_{cache_key}.json")
+            
+            if os.path.exists(cache_file):
+                print(f"Cache hit: Using cached answer for question")
+                with open(cache_file, 'r') as f:
+                    cached_data = json.load(f)
+                    return cached_data['answer']
+            return None
+        except Exception as e:
+            print(f"Cache check error: {e}")
+            return None
+            
     def _update_cache(self, image, question, answer):
-        """Update the answer cache"""
-        # Create a simple hash for the image
-        if isinstance(image, Image.Image):
-            img_array = np.array(image)
-            img_hash = f"{img_array.shape}_{np.mean(img_array):.2f}"
-        else:
-            img_hash = "unknown_image"
+        """
+        Update the cache with a new answer
+        """
+        if not self.cache_dir:
+            return
             
-        # Create cache key
-        cache_key = f"{img_hash}_{question}"
-        
-        # Store in cache (limit cache size to 100 entries)
-        if len(self.answer_cache) >= 100:
-            # Remove oldest entry
-            oldest_key = next(iter(self.answer_cache))
-            del self.answer_cache[oldest_key]
+        try:
+            # Create a hash of the image and question to use as a key
+            img_bytes = self._encode_image_to_base64(image)
+            cache_key = f"{hash(img_bytes)}-{hash(question)}"
+            cache_file = os.path.join(self.cache_dir, f"response_{cache_key}.json")
             
-        self.answer_cache[cache_key] = answer
+            # Save to cache file
+            with open(cache_file, 'w') as f:
+                json.dump({
+                    'question': question,
+                    'answer': answer,
+                    'timestamp': time.time()
+                }, f)
+                
+            print(f"Saved answer to cache: {cache_file}")
+        except Exception as e:
+            print(f"Cache update error: {e}")
+            # Continue execution even if caching fails
 
 class XrayVQAModel:
-    def __init__(self, ollama_url="http://localhost:11434"):
+    def __init__(self, ollama_url="http://localhost:11434", cache_dir=None):
         """Initialize the model and processor"""
         print("\n" + "="*80)
         print("X-RAY VISUAL QUESTION ANSWERING MODEL INITIALIZATION (OLLAMA + LLaVA)")
         print("="*80)
+        
+        # Set cache directory if provided
+        self.cache_dir = cache_dir
+        if self.cache_dir:
+            print(f"Using cache directory: {self.cache_dir}")
+            os.makedirs(self.cache_dir, exist_ok=True)
         
         # Enhanced device selection with better CUDA support
         if torch.cuda.is_available():
@@ -226,18 +248,14 @@ class XrayVQAModel:
         
         # Initialize Ollama with LLaVA model
         try:
-            print("\nInitializing Ollama with LLaVA model...")
-            print("MODEL SELECTION: Ollama LLaVA for medical VQA")
-            
-            # Initialize Ollama LLaVA model
-            self.ollama_model = OllamaLLaVAModel(device=self.device, ollama_url=ollama_url)
-            
-            self.model_type = "ollama-llava"
-            print(f"✅ Successfully initialized Ollama LLaVA model for medical VQA")
+            print(f"Initializing LLaVA model via Ollama API at {ollama_url}")
+            if self.device == "cuda":
+                print("Using CUDA device with Ollama")
+            self.ollama_model = OllamaLLaVAModel(device=self.device, ollama_url=ollama_url, cache_dir=self.cache_dir)
+            print("Successfully initialized LLaVA model via Ollama")
         except Exception as e:
-            error_msg = f"❌ Failed to initialize model: {str(e)}"
-            print(error_msg)
-            raise RuntimeError(f"Cannot initialize model: {str(e)}")
+            print(f"Error initializing Ollama model: {str(e)}")
+            raise
         
         print("\nACTIVE MODEL INFORMATION:")
         print(f"• Model Type: {self.model_type}")
@@ -245,10 +263,6 @@ class XrayVQAModel:
         print(f"• Ollama API: {ollama_url}")
         print(f"• Model: {self.ollama_model.model_name}")
         print("="*80 + "\n")
-        
-        # Set up the cache directory
-        self.cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache')
-        os.makedirs(self.cache_dir, exist_ok=True)
     
     def preprocess_image(self, image_path):
         """

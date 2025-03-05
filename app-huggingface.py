@@ -20,6 +20,37 @@ load_dotenv()
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 HF_API_URL = os.getenv("HF_API_URL", None)  # For alternative API usage
 
+# Configure directory paths using environment variables 
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(os.getcwd(), "uploads"))
+TEMP_DIR = os.getenv("TEMP_DIR", os.path.join(os.getcwd(), "temp"))
+TMP_DIR = os.getenv("TMP_DIR", os.path.join(os.getcwd(), "tmp"))
+EXAMPLES_DIR = os.getenv("EXAMPLES_DIR", os.path.join(os.getcwd(), "examples"))
+CACHE_DIR = os.getenv("CACHE_DIR", os.path.join(os.getcwd(), "cache"))
+
+print(f"Environment configuration:")
+print(f"- UPLOAD_DIR: {UPLOAD_DIR}")
+print(f"- TEMP_DIR: {TEMP_DIR}")
+print(f"- TMP_DIR: {TMP_DIR}")
+print(f"- EXAMPLES_DIR: {EXAMPLES_DIR}")
+print(f"- CACHE_DIR: {CACHE_DIR}")
+print(f"- Current working directory: {os.getcwd()}")
+
+# Initialize directories
+print(f"Creating directory: {UPLOAD_DIR}")
+create_directory_if_not_exists(UPLOAD_DIR)
+print(f"Creating directory: {TEMP_DIR}")
+create_directory_if_not_exists(TEMP_DIR)
+print(f"Creating directory: {TMP_DIR}")
+create_directory_if_not_exists(TMP_DIR)
+print(f"Creating directory: {EXAMPLES_DIR}")
+create_directory_if_not_exists(EXAMPLES_DIR)
+print(f"Creating directory: {CACHE_DIR}")
+create_directory_if_not_exists(CACHE_DIR)
+
+# Set tempfile to use our tmp directory
+tempfile.tempdir = TMP_DIR
+print(f"Set temporary directory to: {tempfile.tempdir}")
+
 # Check for CUDA or other accelerators
 print("\n" + "="*50)
 print("DEVICE CONFIGURATION")
@@ -49,8 +80,9 @@ print("="*50 + "\n")
 
 # Initialize the model - with error handling for Hugging Face environment
 try:
-    # Pass the device explicitly to the model initialization
-    model = XrayVQAModel(ollama_url=OLLAMA_URL)
+    # Pass the device explicitly to the model initialization with cache directory
+    print(f"Initializing model with OLLAMA_URL: {OLLAMA_URL}, cache_dir: {CACHE_DIR}")
+    model = XrayVQAModel(ollama_url=OLLAMA_URL, cache_dir=CACHE_DIR)
     
     # Log device info
     print(f"Model device: {model.device}")
@@ -68,11 +100,14 @@ except Exception as e:
 # Keep chat history
 chat_history = []
 
-def process_example_image(example_path):
-    """Process an example image and return its path."""
+def process_example_image(example_path, question_text):
+    """Process an example image and return its path and the question."""
+    print(f"Processing example: {example_path}, question: {question_text}")
     if not os.path.exists(example_path):
-        return None
-    return example_path
+        print(f"Example file does not exist: {example_path}")
+        return None, question_text
+    print(f"Example file exists at: {example_path}")
+    return example_path, question_text
 
 def add_text(history, text):
     """Add user text to chat history."""
@@ -240,11 +275,11 @@ def get_image_info(file_path):
 # Build the Gradio interface
 with gr.Blocks(css="footer {visibility: hidden}") as interface:
     gr.Markdown("""
-    # X-ray Visual Question Answering
+    # Fracture VQA - X-ray Visual Question Answering
     
     Upload an X-ray image and ask questions about it. The model will analyze the image and answer your questions.
     
-    **Note**: This demo uses the Ollama API with LLaVA model for inference. Make sure Ollama is running with the LLaVA model installed.
+    **Note**: This demo uses Ollama API with the LLaVA model for inference. Default configuration uses Ollama running locally.
     """)
     
     with gr.Row():
@@ -270,15 +305,17 @@ with gr.Blocks(css="footer {visibility: hidden}") as interface:
             image_output = gr.Image(type="filepath", label="X-ray Image")
             image_info = gr.Markdown("Upload an X-ray to see details")
     
-    gr.Examples(
-        examples=[
-            ["example/calcaneal-fracture.jpeg", "Is there a fracture in this X-ray? If so, where?"],
-            ["example/normal-chest.jpg", "Is this chest X-ray normal?"]
-        ],
-        inputs=[image_output, txt],
-        fn=process_example_image,
-        cache_examples=True,
-    )
+    # Disable examples to avoid errors with non-existent files
+    # gr.Examples(
+    #     examples=[
+    #         ["./example/calcaneal-fracture.jpeg", "Is there a fracture in this X-ray? If so, where?"],
+    #         ["./example/normal-chest.jpg", "Is this chest X-ray normal?"]
+    #     ],
+    #     inputs=[image_output, txt],
+    #     outputs=[image_output, txt],
+    #     fn=process_example_image,
+    #     cache_examples=False,
+    # )
     
     # Set up event handlers
     txt_msg = txt.submit(add_text, [chatbot, txt], [chatbot, txt], queue=False)

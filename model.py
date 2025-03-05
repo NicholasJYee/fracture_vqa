@@ -20,13 +20,18 @@ class OllamaLLaVAModel:
         super().__init__()
         self.device = device
         self.ollama_url = ollama_url
-        self.model_name = "llava"  # Using LLaVA as the model
+        self.model_name = "llava:latest"  # Using LLaVA as the model
+        
+        # Timeouts for API requests (in seconds)
+        self.connection_timeout = 10  # Timeout for establishing connection
+        self.read_timeout = 120       # Longer timeout for model inference
         
         # Cache for answers to improve response time for repeated questions
         self.answer_cache = {}
         
         print(f"Initialized Ollama LLaVA Model with API endpoint: {ollama_url}")
         print(f"Using model: {self.model_name}")
+        print(f"API timeouts: connection={self.connection_timeout}s, read={self.read_timeout}s")
         
         # Test the Ollama connection
         try:
@@ -40,7 +45,10 @@ class OllamaLLaVAModel:
     def _test_ollama_connection(self):
         """Test connection to Ollama API"""
         try:
-            response = requests.get(f"{self.ollama_url}/api/tags")
+            response = requests.get(
+                f"{self.ollama_url}/api/tags",
+                timeout=(self.connection_timeout, 10)  # Use shorter read timeout for simple API check
+            )
             if response.status_code == 200:
                 models = response.json().get('models', [])
                 llava_available = any(model.get('name', '').startswith('llava') for model in models)
@@ -106,13 +114,14 @@ class OllamaLLaVAModel:
         }
         
         print("Sending request to Ollama API...")
+        print(f"Using timeouts: connection={self.connection_timeout}s, read={self.read_timeout}s")
         
         try:
             # Call Ollama API
             response = requests.post(
                 f"{self.ollama_url}/api/generate", 
                 json=prompt_data,
-                timeout=30
+                timeout=(self.connection_timeout, self.read_timeout)
             )
             
             # Handle response
@@ -353,7 +362,8 @@ class XrayVQAModel:
             
         # Download the image
         print(f"⬇️ Downloading image from URL")
-        response = requests.get(image_url, timeout=10)
+        # Use a shorter timeout for image download since it's just fetching data, not processing
+        response = requests.get(image_url, timeout=(self.ollama_model.connection_timeout, 30))
         response.raise_for_status()  # Raise an exception for HTTP errors
         
         image = Image.open(BytesIO(response.content)).convert('RGB')

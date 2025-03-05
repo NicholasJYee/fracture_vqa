@@ -79,6 +79,10 @@ This application uses LLaVA (Large Language and Vision Assistant) through the Ol
 
 - `OLLAMA_URL`: Set in .env file to configure the Ollama API URL (default: http://localhost:11434)
 - Device selection: Automatically uses CUDA/MPS if available, falls back to CPU
+- API timeouts: 
+  - Connection timeout: 10 seconds for establishing connection
+  - Read timeout: 120 seconds for model inference (increased for complex X-ray analyses)
+  - URL fetch timeout: 30 seconds for downloading images from URLs
 
 ## Project Structure
 
@@ -100,4 +104,8 @@ This application uses LLaVA (Large Language and Vision Assistant) through the Ol
 - If you encounter errors connecting to Ollama, make sure it's running with `ps aux | grep ollama`
 - If LLaVA model isn't working, try pulling a specific version: `ollama pull llava:13b`
 - For better quality on medical imaging, you may want to try a medically fine-tuned model if available
-- If you're getting "model not found" errors, check that you've successfully pulled the model with `ollama list` 
+- If you're getting "model not found" errors, check that you've successfully pulled the model with `ollama list`
+- If you experience timeout errors:
+  - For connection timeouts: Check your network connection and ensure Ollama is running
+  - For read timeouts: Complex X-rays or larger models may need more time. You can increase the timeout in `model.py` by changing the `read_timeout` value in the `OllamaLLaVAModel` class.
+  - For very large models: Consider using a smaller model or increasing your system resources 

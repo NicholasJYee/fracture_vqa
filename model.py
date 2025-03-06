@@ -25,7 +25,7 @@ class OllamaLLaVAModel:
         
         # Timeouts for API requests (in seconds)
         self.connection_timeout = 10  # Timeout for establishing connection
-        self.read_timeout = 120       # Longer timeout for model inference
+        self.read_timeout = 300       # Longer timeout for model inference
         
         # Cache for answers to improve response time for repeated questions
         self.answer_cache = {}
@@ -216,6 +216,8 @@ class XrayVQAModel:
         if self.cache_dir:
             print(f"Using cache directory: {self.cache_dir}")
             os.makedirs(self.cache_dir, exist_ok=True)
+            
+        self.model_type = "ollama-llava"
         
         # Enhanced device selection with better CUDA support
         if torch.cuda.is_available():

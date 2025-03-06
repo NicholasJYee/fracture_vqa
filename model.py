@@ -10,23 +10,13 @@ import gc  # For explicit garbage collection
 import json
 import base64
 import io
-<<<<<<< HEAD
-=======
 import time
->>>>>>> 451b279b8e5e35715ab9a11e4a3eb284180992c1
 
 class OllamaLLaVAModel:
     """
     Implementation of an X-ray VQA model using Ollama API with LLaVA model.
     This uses the Ollama API to serve the LLaVA model for visual question answering.
     """
-<<<<<<< HEAD
-    def __init__(self, device="cpu", ollama_url="http://localhost:11434"):
-        super().__init__()
-        self.device = device
-        self.ollama_url = ollama_url
-        self.model_name = "llava"  # Using LLaVA as the model
-=======
     def __init__(self, device="cpu", ollama_url="http://localhost:11434", cache_dir=None):
         super().__init__()
         self.device = device
@@ -36,15 +26,10 @@ class OllamaLLaVAModel:
         # Timeouts for API requests (in seconds)
         self.connection_timeout = 10  # Timeout for establishing connection
         self.read_timeout = 120       # Longer timeout for model inference
->>>>>>> 451b279b8e5e35715ab9a11e4a3eb284180992c1
         
         # Cache for answers to improve response time for repeated questions
         self.answer_cache = {}
         
-<<<<<<< HEAD
-        print(f"Initialized Ollama LLaVA Model with API endpoint: {ollama_url}")
-        print(f"Using model: {self.model_name}")
-=======
         # Set cache directory
         self.cache_dir = cache_dir
         if self.cache_dir:
@@ -54,7 +39,6 @@ class OllamaLLaVAModel:
         print(f"Initialized Ollama LLaVA Model with API endpoint: {ollama_url}")
         print(f"Using model: {self.model_name}")
         print(f"API timeouts: connection={self.connection_timeout}s, read={self.read_timeout}s")
->>>>>>> 451b279b8e5e35715ab9a11e4a3eb284180992c1
         
         # Test the Ollama connection
         try:
@@ -68,14 +52,10 @@ class OllamaLLaVAModel:
     def _test_ollama_connection(self):
         """Test connection to Ollama API"""
         try:
-<<<<<<< HEAD
-            response = requests.get(f"{self.ollama_url}/api/tags")
-=======
             response = requests.get(
                 f"{self.ollama_url}/api/tags",
                 timeout=(self.connection_timeout, 10)  # Use shorter read timeout for simple API check
             )
->>>>>>> 451b279b8e5e35715ab9a11e4a3eb284180992c1
             if response.status_code == 200:
                 models = response.json().get('models', [])
                 llava_available = any(model.get('name', '').startswith('llava') for model in models)
@@ -141,21 +121,14 @@ class OllamaLLaVAModel:
         }
         
         print("Sending request to Ollama API...")
-<<<<<<< HEAD
-=======
         print(f"Using timeouts: connection={self.connection_timeout}s, read={self.read_timeout}s")
->>>>>>> 451b279b8e5e35715ab9a11e4a3eb284180992c1
         
         try:
             # Call Ollama API
             response = requests.post(
                 f"{self.ollama_url}/api/generate", 
                 json=prompt_data,
-<<<<<<< HEAD
-                timeout=30
-=======
                 timeout=(self.connection_timeout, self.read_timeout)
->>>>>>> 451b279b8e5e35715ab9a11e4a3eb284180992c1
             )
             
             # Handle response
@@ -181,51 +154,6 @@ class OllamaLLaVAModel:
             print(error_msg)
             return f"Error generating answer: {error_msg}"
     
-<<<<<<< HEAD
-    # Add a simple cache check method
-    def _check_cache(self, image, question):
-        """Check if the answer is in cache"""
-        # Create a simple hash for the image using its size and mean pixel value
-        if isinstance(image, Image.Image):
-            img_array = np.array(image)
-            img_hash = f"{img_array.shape}_{np.mean(img_array):.2f}"
-        else:
-            img_hash = "unknown_image"
-            
-        # Create cache key
-        cache_key = f"{img_hash}_{question}"
-        
-        # Return cached answer if available
-        if cache_key in self.answer_cache:
-            print("Using cached answer")
-            return self.answer_cache[cache_key]
-        
-        return None
-        
-    # Update cache method
-    def _update_cache(self, image, question, answer):
-        """Update the answer cache"""
-        # Create a simple hash for the image
-        if isinstance(image, Image.Image):
-            img_array = np.array(image)
-            img_hash = f"{img_array.shape}_{np.mean(img_array):.2f}"
-        else:
-            img_hash = "unknown_image"
-            
-        # Create cache key
-        cache_key = f"{img_hash}_{question}"
-        
-        # Store in cache (limit cache size to 100 entries)
-        if len(self.answer_cache) >= 100:
-            # Remove oldest entry
-            oldest_key = next(iter(self.answer_cache))
-            del self.answer_cache[oldest_key]
-            
-        self.answer_cache[cache_key] = answer
-
-class XrayVQAModel:
-    def __init__(self, ollama_url="http://localhost:11434"):
-=======
     def _check_cache(self, image, question):
         """
         Check if we already have a cached answer for this image+question
@@ -278,21 +206,19 @@ class XrayVQAModel:
 
 class XrayVQAModel:
     def __init__(self, ollama_url="http://localhost:11434", cache_dir=None):
->>>>>>> 451b279b8e5e35715ab9a11e4a3eb284180992c1
         """Initialize the model and processor"""
         print("\n" + "="*80)
         print("X-RAY VISUAL QUESTION ANSWERING MODEL INITIALIZATION (OLLAMA + LLaVA)")
         print("="*80)
         
-<<<<<<< HEAD
-=======
         # Set cache directory if provided
         self.cache_dir = cache_dir
         if self.cache_dir:
             print(f"Using cache directory: {self.cache_dir}")
             os.makedirs(self.cache_dir, exist_ok=True)
+            
+        self.model_type = "ollama-llava"
         
->>>>>>> 451b279b8e5e35715ab9a11e4a3eb284180992c1
         # Enhanced device selection with better CUDA support
         if torch.cuda.is_available():
             # Get CUDA device info
@@ -324,20 +250,6 @@ class XrayVQAModel:
         
         # Initialize Ollama with LLaVA model
         try:
-<<<<<<< HEAD
-            print("\nInitializing Ollama with LLaVA model...")
-            print("MODEL SELECTION: Ollama LLaVA for medical VQA")
-            
-            # Initialize Ollama LLaVA model
-            self.ollama_model = OllamaLLaVAModel(device=self.device, ollama_url=ollama_url)
-            
-            self.model_type = "ollama-llava"
-            print(f"✅ Successfully initialized Ollama LLaVA model for medical VQA")
-        except Exception as e:
-            error_msg = f"❌ Failed to initialize model: {str(e)}"
-            print(error_msg)
-            raise RuntimeError(f"Cannot initialize model: {str(e)}")
-=======
             print(f"Initializing LLaVA model via Ollama API at {ollama_url}")
             if self.device == "cuda":
                 print("Using CUDA device with Ollama")
@@ -346,7 +258,6 @@ class XrayVQAModel:
         except Exception as e:
             print(f"Error initializing Ollama model: {str(e)}")
             raise
->>>>>>> 451b279b8e5e35715ab9a11e4a3eb284180992c1
         
         print("\nACTIVE MODEL INFORMATION:")
         print(f"• Model Type: {self.model_type}")
@@ -354,13 +265,6 @@ class XrayVQAModel:
         print(f"• Ollama API: {ollama_url}")
         print(f"• Model: {self.ollama_model.model_name}")
         print("="*80 + "\n")
-<<<<<<< HEAD
-        
-        # Set up the cache directory
-        self.cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache')
-        os.makedirs(self.cache_dir, exist_ok=True)
-=======
->>>>>>> 451b279b8e5e35715ab9a11e4a3eb284180992c1
     
     def preprocess_image(self, image_path):
         """
@@ -474,12 +378,8 @@ class XrayVQAModel:
             
         # Download the image
         print(f"⬇️ Downloading image from URL")
-<<<<<<< HEAD
-        response = requests.get(image_url, timeout=10)
-=======
         # Use a shorter timeout for image download since it's just fetching data, not processing
         response = requests.get(image_url, timeout=(self.ollama_model.connection_timeout, 30))
->>>>>>> 451b279b8e5e35715ab9a11e4a3eb284180992c1
         response.raise_for_status()  # Raise an exception for HTTP errors
         
         image = Image.open(BytesIO(response.content)).convert('RGB')

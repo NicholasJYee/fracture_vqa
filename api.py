@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 
 # Load environment variables
 <<<<<<< HEAD
+<<<<<<< HEAD
 print("Loading environment variables from .env file...")
 load_dotenv()
 
@@ -28,11 +29,16 @@ if hf_token:
 else:
     print("No Hugging Face token found in .env file")
 =======
+=======
+>>>>>>> 451b279b8e5e35715ab9a11e4a3eb284180992c1
 load_dotenv()
 
 # Get Ollama URL from environment variable or use default
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+<<<<<<< HEAD
 >>>>>>> efc448571e4c844db60714480a6fba315f800236
+=======
+>>>>>>> 451b279b8e5e35715ab9a11e4a3eb284180992c1
 
 # Configure logging
 logging.basicConfig(

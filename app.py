@@ -18,10 +18,32 @@ load_dotenv()
 # Get Ollama URL from environment variable or use default
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
-# Enable MPS (Metal Performance Shaders) for macOS if available
-if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+# Check for CUDA or other accelerators
+print("\n" + "="*50)
+print("DEVICE CONFIGURATION")
+print("="*50)
+
+if torch.cuda.is_available():
+    # Get CUDA device details
+    cuda_device_count = torch.cuda.device_count()
+    cuda_device_name = torch.cuda.get_device_name(0)
+    print(f"✅ CUDA available: {cuda_device_count} device(s)")
+    print(f"✅ Using CUDA device: {cuda_device_name}")
+    # Enable CUDA optimizations
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cuda.matmul.allow_tf32 = True
+    device = "cuda"
+# Check for MPS (Metal Performance Shaders for Mac)
+elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
     torch.backends.mps.is_built = True
-    print("MPS (Metal Performance Shaders) is available and enabled")
+    print("✅ MPS (Metal Performance Shaders) is available and enabled")
+    device = "mps"
+else:
+    print("ℹ️ No GPU acceleration available, using CPU")
+    device = "cpu"
+
+print(f"Selected device: {device}")
+print("="*50 + "\n")
 
 # Initialize directories
 create_directory_if_not_exists("uploads")
